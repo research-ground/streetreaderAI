@@ -1,0 +1,32 @@
+[project]
+name = "streetreaderai"
+version = "0.1.0"
+description = "StreetReaderAI: Accessible Street Navigation & Exploration"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+dependencies = [
+    "flask",
+    "google-auth",
+    "google-genai",
+    "gunicorn",
+    "numpy",
+    "opencv-python-headless",
+    "openai",
+    "osmnx",
+    "pillow",
+    "pydantic",
+    "python-dotenv",
+    "requests",
+    "shapely",
+    "pytest",
+    "pytest-playwright",
+    "requests-mock",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

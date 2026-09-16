@@ -1,0 +1,25 @@
+.DS_Store
+dist/
+*.zip
+/tmp/
+server/streetreaderai.conf
+__pycache__/
+*.pyc
+tests/*.log
+server/logs/
+server/venv/
+.venv/
+client/node_modules/
+.server_startup.log
+.jetskicli/
+CLAUDE.md
+
+# Local OSM road extracts
+data/
+
+# Disk cache database
+.cache/
+server/.cache/
+*.db
+*.db-wal
+*.db-shm

@@ -1,0 +1,62 @@
+<!--
+ Copyright 2026 Google LLC
+
+ Licensed under the Apache License, Version 2.0 (the "License");
+ you may not use this file except in compliance with the License.
+ You may obtain a copy of the License at
+
+      https://www.apache.org/licenses/LICENSE-2.0
+
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS,
+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ See the License for the specific language governing permissions and
+ limitations under the License.
+ -->
+
+<div class="chat-container">
+  <div class="messages-list" #scrollContainer role="log" aria-live="polite" aria-relevant="additions">
+    @if (chatHistory().length === 0) {
+      <p class="empty-message">Ask a question about the current view.</p>
+    }
+    @for (msg of chatHistory(); track msg.timestamp) {
+      <div class="message" [ngClass]="msg.role">
+        <div class="message-content">
+          <span class="sr-only">{{ msg.role === 'user' ? 'You said:' : 'Assistant said:' }}</span>
+          {{ msg.content }}
+        </div>
+      </div>
+    }
+    @if (isAsking()) {
+      <div class="message assistant typing" aria-busy="true">
+        <div class="message-content">Thinking...</div>
+      </div>
+    }
+  </div>
+
+  <div class="input-area">
+    <div class="listening-indicator" *ngIf="speechInputService.listening()">
+      <mat-icon>mic</mat-icon>
+      <span>Listening...</span>
+    </div>
+    <mat-form-field appearance="outline" class="full-width">
+      <mat-label>Question</mat-label>
+      <input matInput 
+             [formControl]="chatControl" 
+             placeholder="Type a question..."
+             (keydown.enter)="sendMessage()" 
+             aria-label="Type a question about the view">
+      <div matSuffix class="input-actions">
+        <button mat-icon-button (click)="toggleListening()" [color]="speechInputService.listening() ? 'warn' : null" 
+                [class.recording]="speechInputService.listening()" type="button"
+                [aria-label]="speechInputService.listening() ? 'Stop voice command' : 'Start voice command'">
+          <mat-icon aria-hidden="true">{{ speechInputService.listening() ? 'mic' : 'mic_none' }}</mat-icon>
+        </button>
+        <button mat-icon-button (click)="sendMessage()" [disabled]="isAsking() || !chatControl.value" type="button"
+                aria-label="Send question">
+          <mat-icon aria-hidden="true">send</mat-icon>
+        </button>
+      </div>
+    </mat-form-field>
+  </div>
+</div>

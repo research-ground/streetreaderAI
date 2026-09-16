@@ -1,0 +1,27 @@
+# Compiled Python files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environments
+venv/
+env/
+.venv/
+env.bak/
+venv.bak/
+
+# Local Configuration
+streetreaderai.conf
+
+# Logs
+logs/
+*.log
+
+# Mac OS
+.DS_Store
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo

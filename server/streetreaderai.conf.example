@@ -1,0 +1,85 @@
+# StreetReaderAI Server Configuration
+# Configure your external API keys and application options here.
+
+# --- API Keys ---
+# Used for Google Maps Platform APIs (Geocoding, etc.) when LOCATION_SERVICE="google"
+GOOGLE_MAPS_API_KEY=""
+
+# Required for Gemini-based features (describe, ask) when AI_MODEL_PROVIDER="gemini"
+GEMINI_API_KEY=""
+GEMINI_MODEL_ID="gemini-3.8-flash"
+
+# Required for OpenAI-based features (describe, ask) when AI_MODEL_PROVIDER="openai"
+OPENAI_API_KEY=""
+OPENAI_MODEL_ID="gpt-5.6-terra"
+
+# Determines which AI Model Provider to use (gemini or openai)
+AI_MODEL_PROVIDER="gemini"
+
+# --- Feature Selection ---
+# 'mapillary': Uses the Mapillary API v4 (requires MAPILLARY_CLIENT_TOKEN)
+IMAGERY_PROVIDER="mapillary"
+
+# 'google': Uses the Google Geocoding API (requires GOOGLE_MAPS_API_KEY)
+# 'osm': Uses OpenStreetMap / Nominatim (no key required)
+LOCATION_SERVICE="osm"
+
+# Required only if IMAGERY_PROVIDER is 'mapillary'
+MAPILLARY_CLIENT_TOKEN=""
+
+# --- Application Settings ---
+DEFAULT_FOV="120"
+DEFAULT_NEARBY_RADIUS_M="100"
+# Total disk budget for server SQLite LRU caches (MB)
+SERVER_CACHE_MAX_MB="200"
+# Optional custom path for the cache SQLite database (defaults to server/.cache/streetreaderai.db)
+SERVER_CACHE_DB_PATH=""
+
+# --- Starting Address ---
+# Default street address loaded at startup
+STARTING_ADDRESS="411 15th Ave E, Seattle, WA"
+
+# --- Service Timeouts (seconds) ---
+# Overpass server-side query timeout
+OVERPASS_TIMEOUT_S="30.0"
+# Overpass client HTTP read timeout
+OVERPASS_HTTP_TIMEOUT_S="30.0"
+# OpenStreetMap Nominatim geocoding/search HTTP timeout
+NOMINATIM_TIMEOUT_S="12.0"
+# Overpass nearby POI search HTTP timeout
+OVERPASS_NEARBY_TIMEOUT_S="15.0"
+# Mapillary metadata query HTTP timeout
+MAPILLARY_METADATA_TIMEOUT_S="15.0"
+# Mapillary full panorama thumbnail download HTTP timeout
+MAPILLARY_IMAGE_DOWNLOAD_TIMEOUT_S="20.0"
+
+# --- Routing & Navigation Heuristics ---
+# Max distance (meters) an image may sit from the road centerline to belong to the street
+ROUTE_PERP_MAX_M="30.0"
+
+# Centerline half-width (meters) to classify lane as 'center' vs 'left'/'right' sidewalk
+ROUTE_CENTER_HALF_WIDTH_M="2.0"
+
+# Max snap distance (meters) from a geocoded point to an OSM road way
+ROUTE_LOCATE_MAX_PERP_M="60.0"
+
+# Marker search radius (meters) to detect if standing at an intersection
+ROUTE_INTERSECTION_PROBE_M="25.0"
+
+# --- Service Endpoints & Base URLs ---
+# OpenStreetMap Nominatim geocoding base URL (no trailing slash)
+NOMINATIM_BASE_URL="https://nominatim.openstreetmap.org"
+
+# Comma-separated Overpass API interpreter endpoints (primary first, followed by mirrors)
+OVERPASS_ENDPOINTS="https://overpass-api.de/api/interpreter,https://overpass.kumi.systems/api/interpreter,https://overpass.private.coffee/api/interpreter"
+
+# Google Maps API base URL (used for geocoding when LOCATION_SERVICE="google")
+GOOGLE_MAPS_BASE_URL="https://maps.googleapis.com/maps/api"
+
+# Mapillary Graph API base URL
+MAPILLARY_BASE_URL="https://graph.mapillary.com"
+
+# --- Logging ---
+# 'VERBOSE': Detailed debugging output
+# 'ERROR': Only critical errors
+LOG_LEVEL="VERBOSE"

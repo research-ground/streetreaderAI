@@ -1,0 +1,39 @@
+<!--
+ Copyright 2026 Google LLC
+
+ Licensed under the Apache License, Version 2.0 (the "License");
+ you may not use this file except in compliance with the License.
+ You may obtain a copy of the License at
+
+      https://www.apache.org/licenses/LICENSE-2.0
+
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS,
+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ See the License for the specific language governing permissions and
+ limitations under the License.
+ -->
+
+<div class="navigation-container">
+  <mat-form-field class="address-input" appearance="outline">
+    <mat-label>Address Search</mat-label>
+    <input type="text" placeholder="Enter an address" matInput [formControl]="searchControl" 
+           [matAutocomplete]="auto" aria-label="Enter an address to navigate to"
+           (keydown.enter)="loadAddress()">
+    <mat-autocomplete #auto="matAutocomplete" (optionSelected)="loadAddress($event.option.value)">
+      @if (autocompleteState$ | async; as state) {
+        @if (state.status === 'loading') {
+          <mat-option disabled aria-live="polite">Loading suggestions&hellip;</mat-option>
+        } @else if (state.status === 'empty') {
+          <mat-option disabled aria-live="polite">No matching locations found</mat-option>
+        } @else {
+          @for (option of state.items; track option.placeId) {
+            <mat-option [value]="option.description">{{ option.description }}</mat-option>
+          }
+        }
+      }
+    </mat-autocomplete>
+  </mat-form-field>
+
+  <button mat-raised-button color="primary" (click)="loadAddress()" aria-label="Navigate to address">Go</button>
+</div>

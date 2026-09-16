@@ -1,0 +1,169 @@
+/*
+ Copyright 2026 Google LLC
+
+ Licensed under the Apache License, Version 2.0 (the "License");
+ you may not use this file except in compliance with the License.
+ You may obtain a copy of the License at
+
+      https://www.apache.org/licenses/LICENSE-2.0
+
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS,
+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ See the License for the specific language governing permissions and
+ limitations under the License.
+ */
+
+:host {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.top-bar {
+  z-index: 10;
+  height: 48px;
+  min-height: 48px !important;
+}
+
+.viewer-container {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  background-color: #222;
+}
+
+.panorama-image {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  transition: opacity 0.3s ease-in-out;
+}
+
+.panorama-placeholder {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: #1a237e;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 1.5rem;
+  font-weight: 300;
+  letter-spacing: 0.05em;
+}
+
+.status-bar {
+  height: 48px;
+  min-height: 48px;
+  background-color: #323232;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  font-size: 14px;
+  z-index: 10;
+}
+
+.status-container {
+  display: flex;
+  align-items: center;
+  flex: 1;
+}
+
+.status-text {
+  margin-right: 24px;
+}
+
+.address-text {
+  max-width: 300px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.system-status {
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.speech-indicator {
+  display: flex;
+  align-items: center;
+  margin-right: 12px;
+  color: #aaa;
+  font-weight: 500;
+}
+
+.speech-indicator.enabled {
+  color: #4caf50;
+}
+
+.status-divider {
+  margin: 0 12px;
+  color: #666;
+}
+
+.loading-spinner {
+  font-size: 18px;
+  width: 18px;
+  height: 18px;
+  margin-right: 8px;
+  animation: rotate 2s linear infinite;
+}
+
+@keyframes rotate {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.screen-curtain {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: black;
+  z-index: 5; /* Above background (0) but below palettes (likely higher) */
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  color: #fff;
+  font-family: 'Roboto', sans-serif;
+}
+
+.curtain-message {
+  text-align: center;
+}
+
+.curtain-message mat-icon {
+  font-size: 48px;
+  width: 48px;
+  height: 48px;
+  margin-bottom: 8px;
+  color: #aaa;
+}
+
+.curtain-message p {
+  font-size: 18px;
+  font-weight: 500;
+  color: #aaa;
+  margin: 4px 0;
+}
+
+.curtain-hint {
+  font-size: 14px !important;
+  font-weight: 400 !important;
+  opacity: 0.8;
+}

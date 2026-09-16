@@ -1,0 +1,51 @@
+/*
+ Copyright 2026 Google LLC
+
+ Licensed under the Apache License, Version 2.0 (the "License");
+ you may not use this file except in compliance with the License.
+ You may obtain a copy of the License at
+
+      https://www.apache.org/licenses/LICENSE-2.0
+
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS,
+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ See the License for the specific language governing permissions and
+ limitations under the License.
+ */
+
+import { Injectable } from '@angular/core';
+
+@Injectable({
+  providedIn: 'root'
+})
+export class DescriptionCacheService {
+  private readonly PREFIX = 'streetreader_desc_';
+
+  private getKey(lat: number, lng: number, heading: number): string {
+    // Round heading to nearest 45 degrees to handle minor variations
+    const snappedHeading = Math.round(heading / 45) * 45;
+    return `${this.PREFIX}${lat.toFixed(4)}:${lng.toFixed(4)}:${snappedHeading}`;
+  }
+
+  get(lat: number, lng: number, heading: number): string | null {
+    return localStorage.getItem(this.getKey(lat, lng, heading));
+  }
+
+  set(lat: number, lng: number, heading: number, description: string): void {
+    try {
+      localStorage.setItem(this.getKey(lat, lng, heading), description);
+    } catch (e) {
+      console.error("Failed to write to localStorage. Cache might be full.", e);
+      // Implement a cache eviction strategy if necessary
+    }
+  }
+
+  clear(): void {
+    Object.keys(localStorage).forEach(key => {
+      if (key.startsWith(this.PREFIX)) {
+        localStorage.removeItem(key);
+      }
+    });
+  }
+}

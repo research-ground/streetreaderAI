@@ -1,0 +1,106 @@
+<!--
+ Copyright 2026 Google LLC
+
+ Licensed under the Apache License, Version 2.0 (the "License");
+ you may not use this file except in compliance with the License.
+ You may obtain a copy of the License at
+
+      https://www.apache.org/licenses/LICENSE-2.0
+
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS,
+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ See the License for the specific language governing permissions and
+ limitations under the License.
+ -->
+
+<header>
+  <mat-toolbar color="primary" class="top-bar">
+    <span style="font-size: 24px; margin-right: 12px; vertical-align: middle;">🛣️</span>
+    <span>StreetReaderAI</span>
+    <span style="flex: 1 1 auto;"></span>
+    <button mat-button aria-label="Help and keyboard shortcuts" (click)="openHotkeys()">
+      <mat-icon>help</mat-icon>
+      Help
+    </button>
+    <button *ngIf="showDebugMenu()" mat-button aria-label="Debug" (click)="uiService.toggleVisibility('debug')" [color]="uiService.state()['debug'].visible ? 'accent' : ''">
+      <mat-icon>bug_report</mat-icon>
+      Debug
+    </button>
+    <button mat-button aria-label="Settings" (click)="openSettings()">
+      <mat-icon>settings</mat-icon>
+      Settings
+    </button>
+  </mat-toolbar>
+</header>
+
+<main class="viewer-container" role="main">
+  <img *ngIf="currentImage()"
+       class="panorama-image" 
+       [src]="'data:image/jpeg;base64,' + currentImage()"
+       role="img" 
+       [attr.aria-label]="'Street view image at ' + (currentAddress() || 'unknown location')"
+       alt="Street view panorama">
+  <div class="panorama-placeholder" *ngIf="!currentImage()">Loading...</div>
+
+
+
+  <!-- Debug Sidebar -->
+  <div *ngIf="uiService.state()['debug'].visible" class="debug-sidebar mat-elevation-z8" style="position: absolute; top: 0; right: 0; bottom: 0; width: 350px; background: white; z-index: 100; overflow-y: auto;">
+    <div style="padding: 16px; background: #f5f5f5; border-bottom: 1px solid #ddd; display: flex; align-items: center;">
+      <mat-icon style="margin-right: 8px;">bug_report</mat-icon>
+      <h2 style="margin: 0; font-size: 1.2rem; font-weight: 500;">Debug Tools</h2>
+      <span style="flex: 1 1 auto;"></span>
+      <button mat-icon-button (click)="uiService.toggleVisibility('debug')" aria-label="Close debug panel">
+        <mat-icon>close</mat-icon>
+      </button>
+    </div>
+    <div style="padding: 16px;">
+      <app-debug-panel></app-debug-panel>
+    </div>
+  </div>
+
+  <!-- Screen Curtain -->
+  <div class="screen-curtain" *ngIf="stateService.screenCurtain()" aria-hidden="true">
+    <div class="curtain-message">
+      <mat-icon>visibility_off</mat-icon>
+      <p>Screen Curtain On</p>
+      <p class="curtain-hint">Press {{ getCurtainHotkey() }} to toggle off</p>
+    </div>
+  </div>
+
+  <app-palette [components]="leftComponents()" side="left"></app-palette>
+  <app-palette [components]="rightComponents()" side="right"></app-palette>
+</main>
+
+<footer class="status-bar" role="contentinfo">
+  <div aria-live="polite" class="status-container">
+    <span class="status-text address-text" [title]="currentAddress() || 'Ready'">{{ isLoading() ? 'Loading...' : (currentAddress() || 'Ready') }}</span>
+    <span class="status-text" style="width: 350px; display: inline-block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+      Status: {{ appController.activity() }}
+      <span *ngIf="appController.isWaitingOnDescription()"> (Describing...)</span>
+      <span *ngIf="appController.isWaitingOnAnswer()"> (Thinking...)</span>
+    </span>
+    <span class="status-text" *ngIf="formattedIntersection()">
+      <mat-icon style="font-size: 18px; width: 18px; height: 18px; vertical-align: middle;" aria-hidden="true">explore</mat-icon>
+      {{ formattedIntersection() }}
+    </span>
+  </div>
+  <div class="system-status">
+    <div class="speech-indicator" [class.enabled]="speechOutputService.enabled()">
+      <mat-icon style="font-size: 18px; width: 18px; height: 18px; margin-right: 4px;" aria-hidden="true">
+        {{ speechOutputService.enabled() ? 'volume_up' : 'volume_off' }}
+      </mat-icon>
+      <span>Speech {{ speechOutputService.enabled() ? 'On' : 'Off' }}</span>
+    </div>
+    <span class="status-divider">|</span>
+    @if (isLoading()) {
+      <mat-icon class="loading-spinner" aria-hidden="true">sync</mat-icon>
+    } @else {
+      <mat-icon style="font-size: 18px; width: 18px; height: 18px; margin-right: 8px;" aria-hidden="true">check_circle</mat-icon>
+    }
+    <span>Heading: {{ stateService.formattedHeading() }}</span>
+  </div>
+</footer>
+
+<router-outlet />
