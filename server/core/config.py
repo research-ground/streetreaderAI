@@ -19,9 +19,18 @@ from typing import List
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
+_initial_env = {k: v for k, v in os.environ.items() if v.strip()}
+
+example_conf_path = os.path.join(os.path.dirname(__file__), '..', 'streetreaderai.conf.example')
+if os.path.exists(example_conf_path):
+    load_dotenv(dotenv_path=example_conf_path, override=False)
+
 conf_path = os.path.join(os.path.dirname(__file__), '..', 'streetreaderai.conf')
 if os.path.exists(conf_path):
     load_dotenv(dotenv_path=conf_path, override=True)
+
+for _k, _v in _initial_env.items():
+    os.environ[_k] = _v
 
 
 def _require_env(key: str) -> str:

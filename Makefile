@@ -1,17 +1,20 @@
 # StreetReaderAI Makefile
 # Orchestrates setup, building, and testing.
 
-.PHONY: setup build start test test-all check help
+.PHONY: setup build start start-panoramax docker-build docker-run test test-all check help
 
 CLIENT_DIR = client
 
 help:
 	@echo "StreetReaderAI Management Commands:"
-	@echo "  make setup     - Create config from example and install all dependencies"
-	@echo "  make start     - Build client and start server on http://localhost:5001"
-	@echo "  make build     - Build the Angular client into client/dist"
-	@echo "  make test      - Run offline test suite (server unit tests + client tests)"
-	@echo "  make test-all  - Run full test pipeline (integration + browser tests)"
+	@echo "  make setup           - Create config from example and install all dependencies"
+	@echo "  make start           - Build client and start server on http://localhost:5001"
+	@echo "  make start-panoramax - Build client and start with Panoramax imagery (no API keys needed)"
+	@echo "  make docker-build    - Build the StreetReaderAI Docker image"
+	@echo "  make docker-run      - Build and run StreetReaderAI via Docker Compose on port 5001"
+	@echo "  make build           - Build the Angular client into client/dist"
+	@echo "  make test            - Run offline test suite (server unit tests + client tests)"
+	@echo "  make test-all        - Run full test pipeline (integration + browser tests)"
 
 # --- Setup ---
 setup:
@@ -28,6 +31,16 @@ build:
 start: build
 	@echo "==> Starting server on http://localhost:5001 ..."
 	uv run python -m server.index
+
+start-panoramax: build
+	@echo "==> Starting server with Panoramax imagery (zero API keys required) on http://localhost:5001 ..."
+	IMAGERY_PROVIDER=panoramax uv run python -m server.index
+
+docker-build:
+	docker build -t streetreaderai:latest .
+
+docker-run:
+	docker compose up --build
 
 # --- Testing ---
 test:

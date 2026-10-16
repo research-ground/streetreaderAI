@@ -358,4 +358,7 @@ if __name__ == '__main__':
         clear_cache()
         print("Server in-memory cache cleared successfully.")
         sys.exit(0)
-    app.run(debug=True, host='localhost', port=5001)
+    host = os.environ.get('HOST', '0.0.0.0')
+    port = int(os.environ.get('PORT', '5001'))
+    debug = os.environ.get('FLASK_DEBUG', '1').lower() in ('1', 'true', 'yes')
+    app.run(debug=debug, host=host, port=port)

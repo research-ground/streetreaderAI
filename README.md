@@ -90,6 +90,23 @@ make start
 
 Open your browser and navigate to **<http://localhost:5001>**. The Flask backend serves both the REST API and the Angular single-page application.
 
+#### Zero-Key Instant Exploration (`make start-panoramax`)
+Want to test street navigation immediately before registering for a Mapillary token? Run:
+```bash
+make start-panoramax
+```
+This launches StreetReaderAI using **Panoramax** (`20 Rue de Rivoli, Paris, France`) + OpenStreetMap (Nominatim & Overpass), which require **zero API keys**. You can then pass your Gemini key directly in the browser URL (`http://localhost:5001/?gemini_key=YOUR_KEY`) to test AI descriptions and Q&A without editing any configuration files.
+
+#### Running with Docker
+You can also build and run the entire stack (Angular frontend + Python backend + persistent SQLite cache) in Docker without installing Node.js or Python locally:
+```bash
+# Launch with Docker Compose (persists SQLite cache in ./server/.cache)
+GEMINI_API_KEY="your_key" IMAGERY_PROVIDER="panoramax" docker compose up --build
+
+# Or using Make
+make docker-run
+```
+
 #### Optional URL Query Parameters
 You can customize runtime behavior directly via browser URL query parameters:
 * **`?gemini_key=<API_KEY>`** (or `?geminiKey=<API_KEY>`): Overrides the server's configured `GEMINI_API_KEY` for AI scene descriptions (`describeImage`) and Q&A (`askQuestion`) during the current browser tab session (`sessionStorage`). Passing `?gemini_key=` with an empty value clears the session override.
