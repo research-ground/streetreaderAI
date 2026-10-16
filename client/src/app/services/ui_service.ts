@@ -16,7 +16,7 @@
 
 import { Injectable, signal } from '@angular/core';
 
-export type UiComponentId = 'navigation' | 'search' | 'history' | 'poi_list' | 'adjacent_links' | 'scene_description' | 'chat' | 'debug';
+export type UiComponentId = 'navigation' | 'poi_list' | 'adjacent_links' | 'scene_description' | 'chat';
 export type Side = 'left' | 'right';
 
 export interface UiComponentState {
@@ -33,13 +33,10 @@ export class UiService {
   // Initial state for UI components
   private componentsState = signal<Record<UiComponentId, UiComponentState>>({
     navigation: { id: 'navigation', visible: true, side: 'left', order: 0 },
-    search: { id: 'search', visible: false, side: 'left', order: 1 },
-    history: { id: 'history', visible: false, side: 'right', order: 1 },
+    'scene_description': { id: 'scene_description', visible: true, side: 'left', order: 1 },
     'poi_list': { id: 'poi_list', visible: false, side: 'right', order: 2 },
     'adjacent_links': { id: 'adjacent_links', visible: false, side: 'right', order: 3 },
-    'scene_description': { id: 'scene_description', visible: true, side: 'left', order: 1 },
-    chat: { id: 'chat', visible: true, side: 'right', order: 4 },
-    debug: { id: 'debug', visible: false, side: 'right', order: 5 }
+    chat: { id: 'chat', visible: true, side: 'right', order: 4 }
   });
 
   readonly state = this.componentsState.asReadonly();

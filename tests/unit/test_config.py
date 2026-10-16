@@ -24,12 +24,12 @@ def test_config_default_fields():
     # Assert type checks and logic boundaries
     assert isinstance(config.GOOGLE_MAPS_API_KEY, str)
     
-    assert config.IMAGERY_PROVIDER in ["mapillary"]
+    assert config.IMAGERY_PROVIDER in ["mapillary", "panoramax"]
     assert config.LOCATION_SERVICE in ["google", "osm"]
     assert config.GEMINI_MODEL_ID == "gemini-3.8-flash"
     assert config.OPENAI_MODEL_ID == "gpt-5.6-terra"
     
-    assert config.STARTING_ADDRESS == "411 15th Ave E, Seattle, WA"
+    assert config.STARTING_ADDRESS == "601 N 34th St, Seattle, WA"
     assert config.DEFAULT_FOV > 0
     assert config.DEFAULT_NEARBY_RADIUS_M > 0
     assert config.OVERPASS_TIMEOUT_S == 30.0
@@ -38,14 +38,15 @@ def test_config_default_fields():
     assert config.OVERPASS_NEARBY_TIMEOUT_S > 0
     assert config.MAPILLARY_METADATA_TIMEOUT_S > 0
     assert config.MAPILLARY_IMAGE_DOWNLOAD_TIMEOUT_S > 0
-    assert config.ROUTE_PERP_MAX_M > 0
-    assert config.ROUTE_CENTER_HALF_WIDTH_M > 0
+    assert config.PANORAMAX_METADATA_TIMEOUT_S > 0
+    assert config.PANORAMAX_IMAGE_DOWNLOAD_TIMEOUT_S > 0
     assert config.ROUTE_LOCATE_MAX_PERP_M > 0
-    assert config.ROUTE_INTERSECTION_PROBE_M > 0
+    assert config.ROUTE_SNAPSHOT_RADIUS_M > 0
     assert config.NOMINATIM_BASE_URL.startswith("http")
     assert len(config.OVERPASS_ENDPOINTS) > 0
     assert config.GOOGLE_MAPS_BASE_URL.startswith("http")
     assert config.MAPILLARY_BASE_URL.startswith("http")
+    assert config.PANORAMAX_BASE_URL.startswith("http")
 
 def test_config_custom_instantiation():
     # Test custom configuration arguments injection

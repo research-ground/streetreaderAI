@@ -79,9 +79,12 @@ class StreetReaderAPIClient:
         return self._post("searchNearbyPlaces", payload)
 
     def generate_panorama_view(self, image_id: str = None, lat: float = None, lng: float = None,
-                               address: str = None, heading: float = 0.0, pitch: float = 0.0) -> requests.Response:
+                               address: str = None, heading: float = 0.0, pitch: float = 0.0,
+                               canonical_node_id: str = None) -> requests.Response:
         """The primary navigation call: locate by image id, coordinates, or address."""
         payload = {"heading": heading, "pitch": pitch}
+        if canonical_node_id:
+            payload["canonicalNodeId"] = canonical_node_id
         if image_id:
             payload["name"] = image_id
         if lat is not None and lng is not None:

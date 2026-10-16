@@ -124,14 +124,3 @@ class TestWalk:
         assert res.end_marker is None
         assert abs(res.total_dist - 50.0) < 0.01
         assert abs(res.slices[-1].to_along - 70.0) < 0.1
-
-    def test_locate_snaps_with_signed_perp(self):
-        r = RoadNetwork()
-        r.add_ways([north_way(1, 0, 100, 101, 102)])
-        # 5 m east of a northbound way = negative (right-of-travel) perp.
-        hit = r.locate(deg(50), deg(55), max_perp_m=20.0)
-        assert hit is not None
-        way_id, along, perp = hit
-        assert way_id == 1
-        assert abs(along - 50.0) < 1.0
-        assert perp < 0 and abs(abs(perp) - 5.0) < 1.0

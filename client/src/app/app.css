@@ -167,3 +167,58 @@
   font-weight: 400 !important;
   opacity: 0.8;
 }
+
+.demo-movement-keys {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  width: 320px;
+  box-sizing: border-box;
+  z-index: 5;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(4px);
+  border-radius: 6px;
+  padding: 10px 12px;
+  color: #1e293b;
+}
+
+.demo-keys-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: #0f172a;
+}
+
+.demo-keys-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 10px;
+}
+
+.demo-key-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #334155;
+}
+
+.demo-key-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  background: #1e293b;
+  color: #ffffff;
+  font-family: monospace;
+  font-weight: 700;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.demo-key-desc {
+  line-height: 1.25;
+  font-weight: 500;
+}

@@ -49,16 +49,6 @@ def _require_int_env(key: str) -> int:
         )
 
 
-def _require_float_env(key: str) -> float:
-    val_str = _require_env(key)
-    try:
-        return float(val_str)
-    except ValueError:
-        raise ValueError(
-            f"Invalid float value '{val_str}' for configuration '{key}' in server/streetreaderai.conf."
-        )
-
-
 def _get_float_env(key: str, default: float) -> float:
     val = os.environ.get(key)
     if val is None or val.strip() == "":
@@ -76,9 +66,17 @@ def _get_env(key: str, default: str) -> str:
     return val.strip()
 
 
+def _get_bool_env(key: str, default: bool) -> bool:
+    val = os.environ.get(key)
+    if val is None or val.strip() == "":
+        return default
+    return val.strip().lower() in ("1", "true", "yes", "on")
+
+
 class AppConfig(BaseModel):
     # Starting Address
-    STARTING_ADDRESS: str = Field(default_factory=lambda: _get_env("STARTING_ADDRESS", "411 15th Ave E, Seattle, WA"))
+    STARTING_ADDRESS: str = Field(default_factory=lambda: _get_env("STARTING_ADDRESS", "601 N 34th St, Seattle, WA"))
+    PANORAMAX_STARTING_ADDRESS: str = Field(default_factory=lambda: _get_env("PANORAMAX_STARTING_ADDRESS", "20 Rue de Rivoli, Paris, France"))
 
     # API Keys
     GOOGLE_MAPS_API_KEY: str = Field(default_factory=lambda: os.environ.get("GOOGLE_MAPS_API_KEY", ""))
@@ -103,7 +101,8 @@ class AppConfig(BaseModel):
     OPENAI_MODEL_ID: str = Field(default_factory=lambda: _require_env("OPENAI_MODEL_ID"))
     DEFAULT_FOV: int = Field(default_factory=lambda: _require_int_env("DEFAULT_FOV"))
     DEFAULT_NEARBY_RADIUS_M: int = Field(default_factory=lambda: _require_int_env("DEFAULT_NEARBY_RADIUS_M"))
-    SERVER_CACHE_MAX_MB: float = Field(default_factory=lambda: _get_float_env("SERVER_CACHE_MAX_MB", 200.0))
+    SERVER_CACHE_ENABLED: bool = Field(default_factory=lambda: _get_bool_env("SERVER_CACHE_ENABLED", True))
+    SERVER_CACHE_MAX_MB: float = Field(default_factory=lambda: _get_float_env("SERVER_CACHE_MAX_MB", 1024.0))
     SERVER_CACHE_DB_PATH: str = Field(default_factory=lambda: _get_env("SERVER_CACHE_DB_PATH", ""))
 
     # Service Timeouts (seconds)
@@ -113,14 +112,13 @@ class AppConfig(BaseModel):
     OVERPASS_NEARBY_TIMEOUT_S: float = Field(default_factory=lambda: _get_float_env("OVERPASS_NEARBY_TIMEOUT_S", 15.0))
     MAPILLARY_METADATA_TIMEOUT_S: float = Field(default_factory=lambda: _get_float_env("MAPILLARY_METADATA_TIMEOUT_S", 15.0))
     MAPILLARY_IMAGE_DOWNLOAD_TIMEOUT_S: float = Field(default_factory=lambda: _get_float_env("MAPILLARY_IMAGE_DOWNLOAD_TIMEOUT_S", 20.0))
+    PANORAMAX_METADATA_TIMEOUT_S: float = Field(default_factory=lambda: _get_float_env("PANORAMAX_METADATA_TIMEOUT_S", 15.0))
+    PANORAMAX_IMAGE_DOWNLOAD_TIMEOUT_S: float = Field(default_factory=lambda: _get_float_env("PANORAMAX_IMAGE_DOWNLOAD_TIMEOUT_S", 20.0))
 
-    # Routing & Navigation Heuristics
-    ROUTE_PERP_MAX_M: float = Field(default_factory=lambda: _require_float_env("ROUTE_PERP_MAX_M"))
-    ROUTE_CENTER_HALF_WIDTH_M: float = Field(default_factory=lambda: _require_float_env("ROUTE_CENTER_HALF_WIDTH_M"))
-    ROUTE_LOCATE_MAX_PERP_M: float = Field(default_factory=lambda: _require_float_env("ROUTE_LOCATE_MAX_PERP_M"))
-    ROUTE_INTERSECTION_PROBE_M: float = Field(default_factory=lambda: _require_float_env("ROUTE_INTERSECTION_PROBE_M"))
-    ROUTE_SNAPSHOT_RADIUS_M: float = Field(default_factory=lambda: _get_float_env("ROUTE_SNAPSHOT_RADIUS_M", 60.0))
-    ROUTE_BLOCK_CAP_M: float = Field(default_factory=lambda: _get_float_env("ROUTE_BLOCK_CAP_M", 60.0))
+    # Routing & Navigation Settings
+    ROUTE_LOCATE_MAX_PERP_M: float = Field(default_factory=lambda: _get_float_env("ROUTE_LOCATE_MAX_PERP_M", 60.0))
+    ROUTE_SNAPSHOT_RADIUS_M: float = Field(default_factory=lambda: _get_float_env("ROUTE_SNAPSHOT_RADIUS_M", 350.0))
+    DEMO_MODE: bool = Field(default_factory=lambda: _get_bool_env("DEMO_MODE", False))
 
     # Service Endpoints & Base URLs
     NOMINATIM_BASE_URL: str = Field(default_factory=lambda: _require_env("NOMINATIM_BASE_URL").rstrip('/'))
@@ -129,6 +127,7 @@ class AppConfig(BaseModel):
     )
     GOOGLE_MAPS_BASE_URL: str = Field(default_factory=lambda: _require_env("GOOGLE_MAPS_BASE_URL").rstrip('/'))
     MAPILLARY_BASE_URL: str = Field(default_factory=lambda: _require_env("MAPILLARY_BASE_URL").rstrip('/'))
+    PANORAMAX_BASE_URL: str = Field(default_factory=lambda: _get_env("PANORAMAX_BASE_URL", "https://api.panoramax.xyz/api").rstrip('/'))
 
 
 config = AppConfig()

@@ -21,7 +21,7 @@ import { DescriptionService } from './description_service';
 import { ToastService } from './toast_service';
 import { MatDialog } from '@angular/material/dialog';
 import { ErrorDialogComponent } from '../components/error_dialog/error_dialog';
-import { forkJoin } from 'rxjs';
+import { Subscription } from 'rxjs';
 
 /** What we remember about a node we've already visited this session. The
  * server is stateless; this cache is the session. Nothing survives a page
@@ -42,20 +42,33 @@ export class NavigationService {
   private dialog = inject(MatDialog);
 
   private nodeCache = new Map<string, CachedNode>();
+  private viewSub?: Subscription;
+  private addressSub?: Subscription;
+  private hasResolvedInitialAddress = false;
 
   /** Address entered manually. One request: the view endpoint geocodes,
    * anchors, and returns image + links together. */
   loadAddress(address: string) {
+    this.hasResolvedInitialAddress = false;
     this.land({ address, heading: this.stateService.currentHeading() });
   }
 
   /** Initial-boot address load with an explicit facing heading. */
   loadLocationWithHeading(address?: string, heading: number = 0) {
+    this.hasResolvedInitialAddress = false;
     this.land({ address, heading });
+  }
+
+  /** Jump directly to known coordinates and facing heading (used by Demo Mode). */
+  loadCoordinates(lat: number, lng: number, heading: number = 0) {
+    this.hasResolvedInitialAddress = false;
+    this.stateService.setHeading(heading);
+    this.land({ coordinates: { latitude: lat, longitude: lng }, heading });
   }
 
   /** Navigate to a specific image id (deep link). */
   navigateToImage(imageId: string) {
+    this.hasResolvedInitialAddress = false;
     this.land({ imageId, heading: this.stateService.currentHeading() });
   }
 
@@ -107,8 +120,9 @@ export class NavigationService {
     imageOnly?: boolean;
     cachedLinks?: Link[];
   }) {
+    this.viewSub?.unsubscribe();
     this.stateService.setLoading(true);
-    this.apiService.getView({
+    this.viewSub = this.apiService.getView({
       canonicalNodeId: params.canonicalNodeId,
       imageId: params.imageId,
       address: params.address,
@@ -121,7 +135,7 @@ export class NavigationService {
     });
   }
 
-  private applyView(view: GetViewResponse, params: { coordinates?: { latitude: number; longitude: number }; cachedLinks?: Link[]; heading: number }) {
+  private applyView(view: GetViewResponse, params: { coordinates?: { latitude: number; longitude: number }; cachedLinks?: Link[]; heading: number; imageOnly?: boolean }) {
     const nodeId = view.canonicalNodeId ?? null;
     const coords = view.panoramaMetadata?.coordinates ?? params.coordinates ?? null;
     this.stateService.setImage(view.image ?? null);
@@ -145,13 +159,32 @@ export class NavigationService {
       this.descriptionService.needsRefresh(false);
     }
 
-    if (coords) {
-      this.apiService.getAddress(coords.latitude, coords.longitude).subscribe({
-        next: (address) => this.stateService.setMetadata({
-          address: address?.address ?? 'Unknown Address',
-        }),
-        error: () => this.stateService.setMetadata({ address: 'Unknown Address' }),
-      });
+    if (coords && !params.imageOnly) {
+      const streetNames = Array.from(
+        new Set(
+          links
+            .map((l) => l.streetName?.trim())
+            .filter((s): s is string => !!s && s.length > 0),
+        ),
+      );
+      if (this.hasResolvedInitialAddress && streetNames.length > 0) {
+        const label =
+          nodeId?.startsWith('osm_') && streetNames.length >= 2
+            ? `${streetNames[0]} & ${streetNames[1]}`
+            : streetNames[0];
+        this.stateService.setMetadata({ address: label });
+      } else {
+        this.addressSub?.unsubscribe();
+        this.addressSub = this.apiService.getAddress(coords.latitude, coords.longitude).subscribe({
+          next: (address) => {
+            this.hasResolvedInitialAddress = true;
+            this.stateService.setMetadata({
+              address: address?.address ?? (streetNames[0] || 'Unknown Address'),
+            });
+          },
+          error: () => this.stateService.setMetadata({ address: streetNames[0] || 'Unknown Address' }),
+        });
+      }
     }
   }
 

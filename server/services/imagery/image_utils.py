@@ -19,7 +19,15 @@ import math
 import cv2
 import numpy as np
 
-def crop_panorama(image_bytes: bytes, heading: float, img_heading: float, fov: int, output_width: int = 1024, output_height: int = 768) -> bytes:
+def crop_panorama(
+    image_bytes: bytes,
+    heading: float,
+    img_heading: float,
+    fov: int,
+    output_width: int = 1440,
+    output_height: int = 1080,
+    pitch_deg: float = 0.0,
+) -> bytes:
     """
     Crops a 360 panorama into a specific window based on heading and FOV.
     Uses OpenCV to apply a proper rectilinear projection (removes fisheye distortion).
@@ -35,7 +43,6 @@ def crop_panorama(image_bytes: bytes, heading: float, img_heading: float, fov: i
     # 2. Calculate the relative yaw and pitch
     # Mapillary pano center is the compass_angle.
     yaw_deg = (heading - img_heading + 180) % 360 - 180
-    pitch_deg = 0  # Assuming horizontal look for now
     
     yaw = math.radians(yaw_deg)
     pitch = math.radians(pitch_deg)
@@ -82,8 +89,8 @@ def crop_panorama(image_bytes: bytes, heading: float, img_heading: float, fov: i
     map_x = map_x.astype(np.float32)
     map_y = map_y.astype(np.float32)
     
-    # Apply the remap. BORDER_WRAP automatically handles 360-degree wrapping for X axis
-    cropped = cv2.remap(img, map_x, map_y, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP)
+    # Apply the remap using bicubic interpolation. BORDER_WRAP handles 360-degree horizontal wrapping
+    cropped = cv2.remap(img, map_x, map_y, interpolation=cv2.INTER_CUBIC, borderMode=cv2.BORDER_WRAP)
     
     # 4. Encode to JPEG
     is_success, buffer = cv2.imencode(".jpg", cropped, [cv2.IMWRITE_JPEG_QUALITY, 95])

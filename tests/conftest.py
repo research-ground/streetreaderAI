@@ -129,10 +129,28 @@ def auto_start_server():
 
 
 @pytest.fixture(autouse=True)
-def reset_global_caches():
-    from server.core.cache import image_cache, window_cache, road_cache, description_cache
-    image_cache.clear()
-    window_cache.clear()
-    road_cache.clear()
-    description_cache.clear()
-    yield
+def reset_global_caches(request):
+    if "ground_truth" in str(request.node.fspath):
+        yield
+        return
+    import server.core.cache as cache_mod
+    from server.core.cache import (
+        DiskCache,
+        image_cache,
+        window_cache,
+        road_cache,
+        description_cache,
+        metadata_cache,
+        graph_cache,
+    )
+    orig_backend = cache_mod._global_disk_cache
+    mem_backend = DiskCache(db_path=":memory:", max_bytes=orig_backend.max_bytes)
+    for adapter in (image_cache, window_cache, road_cache, description_cache, metadata_cache, graph_cache):
+        adapter.backend = mem_backend
+    cache_mod._global_disk_cache = mem_backend
+    try:
+        yield
+    finally:
+        for adapter in (image_cache, window_cache, road_cache, description_cache, metadata_cache, graph_cache):
+            adapter.backend = orig_backend
+        cache_mod._global_disk_cache = orig_backend

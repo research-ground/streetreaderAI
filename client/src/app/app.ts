@@ -14,16 +14,13 @@
  limitations under the License.
  */
 
-import { Component, inject, computed, signal, OnInit, OnDestroy } from '@angular/core';
+import { Component, inject, computed, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterOutlet } from '@angular/router';
 import { MatToolbarModule } from '@angular/material/toolbar';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatDialogModule, MatDialog } from '@angular/material/dialog';
-import { MatCardModule } from '@angular/material/card';
-import { MatListModule } from '@angular/material/list';
-import { MatDividerModule } from '@angular/material/divider';
 import { UiService } from './services/ui_service';
 import { StateService } from './services/state_service';
 import { ApiService } from './services/api_service';
@@ -34,15 +31,15 @@ import { StreetViewLinksService } from './services/street_view_links_service';
 import { DescriptionService } from './services/description_service';
 import { SpeechOutputService } from './services/speech_output_service';
 import { SpeechInputService } from './services/speech_input_service';
-import { LoggingService } from './services/logging_service';
 import { ToastService } from './services/toast_service';
 import { SettingsDialog } from './components/settings_dialog/settings_dialog';
 import { HotkeysDialog } from './components/hotkeys_dialog/hotkeys_dialog';
 import { WelcomeDialogComponent } from './components/welcome_dialog/welcome_dialog';
 import { ActivationDialogComponent } from './components/activation_dialog/activation_dialog';
 import { PaletteComponent } from './components/palette/palette';
-import { DebugPanelComponent } from './components/debug_panel/debug_panel';
+import { RadarViewComponent } from './components/radar_view/radar_view';
 import { AppController } from "./services/app_controller";
+import { DemoModeService } from './demo_mode';
 
 import { Subscription } from 'rxjs';
 
@@ -56,11 +53,8 @@ import { Subscription } from 'rxjs';
     MatButtonModule,
     MatIconModule,
     MatDialogModule,
-    MatCardModule,
-    MatListModule,
-    MatDividerModule,
     PaletteComponent,
-    DebugPanelComponent
+    RadarViewComponent
   ],
   templateUrl: './app.html',
   styleUrl: './app.css'
@@ -76,28 +70,18 @@ export class App implements OnInit, OnDestroy {
   protected speechOutputService = inject(SpeechOutputService);
   private speechInputService = inject(SpeechInputService);
   private hotkeyService = inject(HotkeyService); 
-  private loggingService = inject(LoggingService);
   private toastService = inject(ToastService);
   protected appController = inject(AppController);
+  protected demoModeService = inject(DemoModeService);
   private dialog = inject(MatDialog);
 
   private commandSubscription?: Subscription;
-
-  protected showDebugMenu = signal(
-    typeof window !== 'undefined' && (
-      new URLSearchParams(window.location.search).has('debug') ||
-      localStorage.getItem('streetreader_show_debug') === 'true'
-    )
-  );
 
   protected leftComponents = computed(() => this.uiService.getComponentsBySide('left'));
   protected rightComponents = computed(() => this.uiService.getComponentsBySide('right'));
   protected currentImage = this.stateService.currentImage;
   protected currentAddress = computed(() => this.stateService.state().address);
   protected currentHeading = computed(() => this.stateService.state().heading);
-  protected currentLat = computed(() => this.stateService.state().location.lat);
-  protected currentLng = computed(() => this.stateService.state().location.lng);
-  protected nearbyPOIs = computed(() => this.stateService.state().nearbyPOIs);
   protected isLoading = computed(() => this.stateService.state().isLoading);
   protected adjacentNodes = computed(() => this.stateService.state().adjacentNodes);
   protected intersectionInfo = computed(() => this.streetViewLinksService.analyzeIntersection(this.currentHeading(), this.adjacentNodes()));
@@ -125,19 +109,18 @@ export class App implements OnInit, OnDestroy {
 
     return msg;
   });
-  protected availableDirections = computed(() => this.streetViewLinksService.getAvailableDirections(this.currentHeading(), this.adjacentNodes()));
-  protected canMoveForward = computed(() => this.availableDirections().includes('forward'));
 
   ngOnInit() {
     this.commandSubscription = this.commandService.commands$.subscribe(command => this.handleCommand(command));
     this.appController.setTraveling();
     this.apiService.getConfig().subscribe({
       next: (cfg) => {
-        const address = cfg.startingAddress || '411 15th Ave E, Seattle, WA';
+        this.demoModeService.applyRuntimeConfig(cfg.demoMode);
+        const address = cfg.startingAddress || '601 N 34th St, Seattle, WA';
         this.navigationService.loadLocationWithHeading(address, 0);
       },
       error: () => {
-        this.navigationService.loadLocationWithHeading('411 15th Ave E, Seattle, WA', 0);
+        this.navigationService.loadLocationWithHeading('601 N 34th St, Seattle, WA', 0);
       }
     });
 

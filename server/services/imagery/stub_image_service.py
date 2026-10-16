@@ -14,13 +14,16 @@
  limitations under the License.
  """
 
-"""Stub imagery service for booting without a Mapillary token: road geometry
-and geocoding still work, but every imagery read is empty, so navigation will
-find no views. Matches MapillaryProvider's surface (the navigation layer only
-calls these three methods)."""
+"""Stub imagery service for booting without an imagery provider configured:
+road geometry and geocoding still work, but every imagery read is empty, so
+navigation will find no views."""
+
+from server.services.imagery.base import ImageryProvider
 
 
-class StubImageService:
+class StubImageService(ImageryProvider):
+    provider_name = "stub"
+
     def get_metadata_bbox(self, *args, **kwargs):
         return []
 

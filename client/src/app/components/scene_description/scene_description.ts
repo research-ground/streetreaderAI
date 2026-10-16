@@ -23,7 +23,7 @@ import { DescriptionService } from '../../services/description_service';
 import { DescriptionCacheService } from '../../services/description_cache_service';
 import { SpeechOutputService } from '../../services/speech_output_service';
 import { StreetViewLinksService } from '../../services/street_view_links_service';
-import { Subscription, Subject, takeUntil } from 'rxjs';
+import { Subscription, Subject, takeUntil, debounce, timer, of } from 'rxjs';
 
 @Component({
   selector: 'app-scene-description',
@@ -53,9 +53,16 @@ export class SceneDescriptionComponent implements OnDestroy {
   });
 
   constructor() {
-    this.subscription = this.descriptionService.refreshNeeded$.subscribe((force) => {
-      this.fetchDescription(force);
-    });
+    this.subscription = this.descriptionService.refreshNeeded$
+      .pipe(
+        debounce((force) => {
+          this.currentFetch$.next();
+          return force ? of(0) : timer(250);
+        }),
+      )
+      .subscribe((force) => {
+        this.fetchDescription(force);
+      });
 
     this.descriptionService.cancel$.pipe(takeUntil(this.destroy$)).subscribe(() => {
       this.currentFetch$.next();

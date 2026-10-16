@@ -34,7 +34,7 @@ test:
 	@echo "==> Running server unit tests..."
 	uv run pytest tests/unit/ -q
 	@echo "==> Running client tests..."
-	cd $(CLIENT_DIR) && npm test
+	cd $(CLIENT_DIR) && npm test -- --watch=false
 	@echo "==> All offline tests passed!"
 
 check: test

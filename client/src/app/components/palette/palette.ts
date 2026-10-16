@@ -14,7 +14,7 @@
  limitations under the License.
  */
 
-import { Component, Input } from '@angular/core';
+import { Component, Input, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { MatExpansionModule } from '@angular/material/expansion';
 import { MatButtonModule } from '@angular/material/button';
@@ -25,11 +25,12 @@ import { SceneDescriptionComponent } from '../scene_description/scene_descriptio
 import { NavigationComponent } from '../navigation/navigation';
 import { PoiListComponent } from '../poi_list/poi_list';
 import { ChatComponent } from '../chat/chat';
+import { DemoChatComponent, DemoModeService, DemoNavigationComponent } from '../../demo_mode';
 
 @Component({
   selector: 'app-palette',
   standalone: true,
-  imports: [CommonModule, MatExpansionModule, MatButtonModule, MatIconModule, AdjacentLinksComponent, SceneDescriptionComponent, NavigationComponent, PoiListComponent, ChatComponent],
+  imports: [CommonModule, MatExpansionModule, MatButtonModule, MatIconModule, AdjacentLinksComponent, SceneDescriptionComponent, NavigationComponent, PoiListComponent, ChatComponent, DemoNavigationComponent, DemoChatComponent],
   template: `
     <div class="floating-palette" [ngClass]="side + '-palette'">
       <mat-accordion multi>
@@ -41,7 +42,11 @@ import { ChatComponent } from '../chat/chat';
             
             <div class="palette-content">
               @if (comp.id === 'navigation') {
-                <app-navigation></app-navigation>
+                @if (demoService.enabled()) {
+                  <app-demo-navigation></app-demo-navigation>
+                } @else {
+                  <app-navigation></app-navigation>
+                }
               } @else if (comp.id === 'scene_description') {
                 <app-scene-description></app-scene-description>
               } @else if (comp.id === 'adjacent_links') {
@@ -49,7 +54,11 @@ import { ChatComponent } from '../chat/chat';
               } @else if (comp.id === 'poi_list') {
                 <app-poi-list></app-poi-list>
               } @else if (comp.id === 'chat') {
-                <app-chat></app-chat>
+                @if (demoService.enabled()) {
+                  <app-demo-chat></app-demo-chat>
+                } @else {
+                  <app-chat></app-chat>
+                }
               } @else {
                 <p>Content for {{ comp.id }}</p>
               }
@@ -88,6 +97,7 @@ import { ChatComponent } from '../chat/chat';
   `]
 })
 export class PaletteComponent {
+  protected demoService = inject(DemoModeService);
   @Input() components: UiComponentState[] = [];
   @Input() side: 'left' | 'right' = 'left';
 

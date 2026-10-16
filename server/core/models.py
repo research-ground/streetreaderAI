@@ -42,6 +42,10 @@ class LocationMetadata(ApiModel):
     description: Optional[str] = None
     isPano: bool = False
     sequenceId: Optional[str] = None
+    thumbUrl: Optional[str] = None
+    prevImageId: Optional[str] = None
+    nextImageId: Optional[str] = None
+    provider: Optional[str] = None
 
 class StandardResponse(ApiModel):
     """Base response model for endpoint payloads."""
@@ -95,15 +99,16 @@ class POI(ApiModel):
 class NearbyPlacesResponse(StandardResponse):
     places: Optional[List[POI]] = None
 
-# --- Debug / diagnostics ---
+# --- Radar / Local Graph ---
 
 class DebugNode(ApiModel):
     canonicalNodeId: str
     coordinates: LatLng
     kind: str                    # "intersection" | "waypoint"
-    status: str = "unknown"      # "ok" | "path_only" | "unknown" (not yet resolved)
+    status: str = "unknown"      # "ok" | "path_only" | "unknown"
     imageId: Optional[str] = None
     streetNames: List[str] = []
+    sequenceId: Optional[str] = None
 
 class DebugEdge(ApiModel):
     fromId: str
@@ -111,6 +116,7 @@ class DebugEdge(ApiModel):
     bearing: float
     lengthMeters: float
     streetName: str = ""
+    polyline: List[LatLng] = []
 
 class LocalGraphResponse(StandardResponse):
     center: LatLng
@@ -118,6 +124,7 @@ class LocalGraphResponse(StandardResponse):
     currentNodeId: Optional[str] = None
     nodes: List[DebugNode] = []
     edges: List[DebugEdge] = []
+    queryAudit: Optional[dict] = None
 
 # --- AI Service Models ---
 

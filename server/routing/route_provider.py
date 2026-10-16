@@ -14,93 +14,30 @@
  limitations under the License.
  """
 
-"""
-RouteProvider — the single navigation engine: OSM roads + Mapillary imagery.
+"""RouteProvider — 5-Step Navigation Engine (Intersections + Direct Sequence Slices).
 
-This file is the DOMAIN LOGIC: the per-request road graph, the tight-window
-imagery snapshot, and the selection algorithm. All external API access lives
-behind interfaces under server/services/ — road data through `RoadDataSource`
-(services/streetmap: bundled extracts first, Overpass fallback), imagery
-through the injected image service, geocoding through the injected location
-service. Every operational number lives in `RouteParams` so a human or an AI
-can retune behavior without touching logic (constructor override or the
-ROUTE_* environment variables).
-
-============================ DESIGN LEDGER ============================
-Why this works the way it does — each rule earned its place by evidence.
-Parameters marked [user] are the product owner's explicit spec; change them
-only with sign-off. [config] marks heuristic tuning constants configured in
-server/streetreaderai.conf. [plumbing] bounds compute, not behavior.
-
-1. THE ALGORITHM (user spec, implemented as literally as possible):
-   Seed:  snap the geocoded point to its NAMED street (corner buildings are
-          equidistant from two roads; the address already names the right
-          one), then search ±1 m doubling until any image is found — nearest
-          wins outright. Sidewalk preference: right (if it has a continuation
-          point before the next intersection), then left, then center.
-   Step:  look 0.8–1.2 steps ahead along the road; among candidates pick the
-          one minimizing perpendicular movement (stay in your lane). Empty →
-          expand ahead one step-window at a time up to the condensing zone;
-          same side anywhere beats the other side anywhere ("a sparse
-          straight line beats a dense zigzag"). No waypoints within
-          min(capture_max, block/2) of an intersection — that zone belongs to
-          the intersection. Block empty → the step IS the intersection (if it
-          has an image in its zone); otherwise that direction is closed.
-   Turn:  keep the lane class; junctions within junction_merge_m are ONE
-          corner (split roadways put 2-4 OSM nodes on a physical crossing —
-          evidence: 1600 7th Ave, Seattle). Facing follows the road: each
-          link carries the road tangent at its landing (arrivalHeading) so
-          the client can reorient along curves.
-   Changes to the algorithm require a specific map location that goes
-   failure → success, plus regression on the known-good routes. Do not tune
-   from assumptions.
-
-2. TIGHT WINDOWS, ALWAYS (measured 2026-07-11): Mapillary bbox reads are
-   silently TRUNCATED server-side — identical queries returned 24/0/76/297
-   images; boxes ≤~100 m are exact and reproducible, ~300 m boxes lose up to
-   a third per read. So every fetch here is the
-   small window a single decision needs; nothing is prefetched. Corollary: a
-   single empty read proves nothing — absence is only accepted after the
-   expand-on-empty doubling (seeds, reference lookups).
-
-3. PANOS ONLY (user decision, 2026-07-11): flat photos have a fixed facing;
-   chosen as a landing view they hijack the user's heading (observed
-   bounce-backs at way_6457203 off_226/off_348/off_123). Only panoramas are
-   navigation views — a pano crops to any requested heading, so orientation
-   hijack is structurally impossible.
-
-4. JUNCTION IMAGES COME FROM THE ARMS, NEVER THE CENTER (user correction,
-   2026-07-11): the geometric center of a crossing is the one place imagery
-   structurally cannot exist (capture tracks run on approaches and
-   sidewalks). Candidates are gathered along each merged arm within the
-   condensing window; there is deliberately no distance-to-center test.
-
-5. NO DATA GAPS: every "no imagery exists there" claim in this project's
-   history was false — our own filtering or truncated reads. When a query
-   returns nothing, the correct thought is: "the data is there; why isn't my
-   query showing it?" Likewise a failed imagery fetch must never present as
-   an empty street (the Mapillary client raises instead of returning []).
-
-6. STATELESS SERVER (user): each request builds a throwaway snapshot and
-   forgets. The client caches traversed nodes; within-session consistency
-   lives there. Reasoning scope is the current node, its neighbors, and at
-   most the block ahead to the next intersection.
-=======================================================================
-
-Layout: §0 parameters · §1 road geometry (RoadNetwork) · §2 imagery windows
-(AreaSnapshot) · §3 selection (seed/step/links) · §4 the RouteProvider class.
+1. Identify OSM intersections (merging multi-node junctions and roundabouts)
+   and walk between them to determine street block adjacency `(cid_a, cid_b)`.
+2. Discover and expand 360° camera sequences near intersections, sorting each
+   sequence's frames chronologically by `captureTime`.
+3. Slice each sequence into contiguous passes `frames[idx_a : idx_b + 1]` that
+   visit two adjacent intersections within `capture_max_m` (`30m`), with no
+   intermediate intersection visit (`< 18m`), `sinuosity <= 1.35`, and `max_step <= 30m`.
+4. Pick the single best sequence slice per street block and sample intermediate
+   frames every `~step_m` (`18m`).
+5. Unify each intersection to one canonical node (`osm_<cid>`) and connect each
+   block as a bidirectional chain `[osm_<cid_a>, seq_<f1>, ..., osm_<cid_b>]`.
 """
 
 import concurrent.futures
 import math
 import os
-import time
 from bisect import bisect_left, bisect_right
 from collections import defaultdict
 from dataclasses import dataclass, field, fields
 from typing import Dict, List, Optional, Set, Tuple
 
-from server.core.cache import window_cache
+from server.core.cache import graph_cache, query_audit, road_cache, window_cache
 from server.core.config import config
 from server.core.exceptions import APIException
 from server.core.logger import log_call, logger
@@ -114,139 +51,91 @@ from server.core.models import (
     PanoramaMetadata,
     ViewResponse,
 )
+from server.routing.map_math import calculate_distance
 from server.services.streetmap.base import RoadDataSource
 from server.services.streetmap.local_extract_road_service import LocalExtractRoadService
-from server.routing.map_math import calculate_distance
-from server.services.streetmap.overpass_road_service import OverpassRoadService
+from server.services.streetmap.overpass_road_service import (
+    OsmMapApiRoadService,
+    OverpassRoadService,
+)
 
-M_PER_DEG_LAT = 111139.0  # matches server.routing.map_math.calculate_distance
+M_PER_DEG_LAT = 111139.0
+
+_STREET_ABBREVS = {
+    "n": "north", "s": "south", "e": "east", "w": "west",
+    "ne": "northeast", "nw": "northwest", "se": "southeast", "sw": "southwest",
+    "st": "street", "ave": "avenue", "av": "avenue", "blvd": "boulevard",
+    "rd": "road", "dr": "drive", "pl": "place", "ln": "lane",
+    "ct": "court", "pkwy": "parkway", "hwy": "highway", "ter": "terrace", "cir": "circle",
+}
 
 
-# =====================================================================
-# §0 PARAMETERS — every operational number, tweakable by human or AI.
-# =====================================================================
+def _compass_bearing(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    dx = (lng2 - lng1) * math.cos(math.radians((lat1 + lat2) * 0.5))
+    dy = lat2 - lat1
+    return 0.0 if abs(dx) < 1e-12 and abs(dy) < 1e-12 else math.degrees(math.atan2(dx, dy)) % 360.0
+
+
+def _ang_diff(a: float, b: float) -> float:
+    return abs(((a - b + 180.0) % 360.0) - 180.0)
+
+
+def _norm_street(name: Optional[str]) -> str:
+    raw = (name or "").strip().casefold()
+    if not raw:
+        return ""
+    tokens = [t.strip(".,") for t in raw.split() if t.strip(".,")]
+    if len(tokens) > 1 and tokens[0].isdigit():
+        tokens = tokens[1:]
+    return " ".join(_STREET_ABBREVS.get(t, t) for t in tokens)
 
 
 @dataclass(frozen=True)
 class RouteParams:
-    """All tunables in one place. Override per instance
-    (`RouteProvider(..., params=RouteParams(step_m=10))`) or via environment
-    (`ROUTE_STEP_M=10`, see `from_env`). Provenance tags as in the ledger."""
-
-    step_m: float = 20.0
-    """[user] Target stride. Was 10; raised to 20 for the visual-navigation
-    eval (2026-07-11). The step slice below scales with it."""
-
-    slice_lo_frac: float = 0.8
-    slice_hi_frac: float = 1.2
-    """[user] The step window ("8-12 m forward for a 10 m step"): a landing is
-    sought at step_m*[lo,hi] first; expansion happens only when it's empty."""
-
-    seed_windows_m: Tuple[float, ...] = (1.0, 2.0, 4.0, 8.0, 16.0, 32.0)
-    """[user] "±1 m and expand as needed": the first non-empty window wins and
-    nothing outside it is ever considered — being at the right place outranks
-    having a better photo (anchor-drift regression, 2026-07-11)."""
-
+    step_m: float = 18.0
     capture_max_m: float = 30.0
-    """[user] Condensing-zone cap: min(this, block/2) around a junction admits
-    no waypoints; near-corner satellites show the same scene and masquerade as
-    decision points. (Eval tuning round 1; was 3x step.)"""
-
     junction_merge_m: float = 30.0
-    """[user] Decision markers within this distance are ONE junction
-    (split roadways; evidence: 1600 7th Ave, 2-4 OSM nodes per corner)."""
-
+    max_sinuosity: float = 1.35
+    max_frame_step_m: float = 30.0
     panos_only: bool = True
-    """[user] Only panoramas are navigation views (ledger #3)."""
-
-    perp_max_m: float = field(default_factory=lambda: getattr(config, "ROUTE_PERP_MAX_M", 30.0))
-    """[config] Configured in server/streetreaderai.conf (ROUTE_PERP_MAX_M).
-    How far off the centerline an image may sit and still belong to the street
-    ("generous borders" per spec, no number given). 15 m dropped real downtown
-    sidewalk imagery — raised with evidence (eval tuning round 1, change 2; was 22)."""
-
-    center_half_width_m: float = field(default_factory=lambda: getattr(config, "ROUTE_CENTER_HALF_WIDTH_M", 2.0))
-    """[config] Configured in server/streetreaderai.conf (ROUTE_CENTER_HALF_WIDTH_M).
-    |perp| below this = "center" lane class; beyond it the sign picks the sidewalk
-    side. Defines right/left/center preference to prevent zigzagging."""
-
-    reference_windows_m: Tuple[float, ...] = (3.0, 6.0, 12.0)
-    """Landing-reference lookup windows, expand-on-empty: a single tiny read
-    can flake (way_8071899_off_39: ±3 m read empty, ±6 m held 95 panos)."""
-
     locate_max_perp_m: float = field(default_factory=lambda: getattr(config, "ROUTE_LOCATE_MAX_PERP_M", 60.0))
-    """[config] Configured in server/streetreaderai.conf (ROUTE_LOCATE_MAX_PERP_M).
-    Max snap distance from a geocoded point to a road."""
-
-    intersection_probe_m: float = field(default_factory=lambda: getattr(config, "ROUTE_INTERSECTION_PROBE_M", 25.0))
-    """[config] Configured in server/streetreaderai.conf (ROUTE_INTERSECTION_PROBE_M).
-    "Am I at an intersection?" marker search radius."""
-
-    block_cap_m: float = field(default_factory=lambda: getattr(config, "ROUTE_BLOCK_CAP_M", 60.0))
-    """[plumbing] Max look-ahead per direction (~one long block)."""
-
-    snapshot_radius_m: float = field(default_factory=lambda: getattr(config, "ROUTE_SNAPSHOT_RADIUS_M", 60.0))
-    """[plumbing] Road geometry loaded per request (60m radius = 120m x 120m box)."""
-
+    snapshot_radius_m: float = field(default_factory=lambda: getattr(config, "ROUTE_SNAPSHOT_RADIUS_M", 350.0))
     overpass_timeout_s: float = field(default_factory=lambda: getattr(config, "OVERPASS_TIMEOUT_S", 30.0))
-    """[plumbing] Per-attempt Overpass timeout; endpoints rotate on failure."""
-
-    @property
-    def slice_lo(self) -> float:
-        return self.slice_lo_frac * self.step_m
-
-    @property
-    def slice_hi(self) -> float:
-        return self.slice_hi_frac * self.step_m
 
     @classmethod
     def from_env(cls) -> "RouteParams":
-        """Build params with `ROUTE_<FIELD>` env overrides (e.g.
-        ROUTE_STEP_M=10, ROUTE_PANOS_ONLY=false,
-        ROUTE_SEED_WINDOWS_M=1,2,4,8). Lets anyone retune a running system
-        without code edits."""
         overrides = {}
         for f in fields(cls):
             raw = os.environ.get(f"ROUTE_{f.name.upper()}")
-            if raw is None:
-                continue
-            if isinstance(f.default, bool):
-                overrides[f.name] = raw.strip().lower() in ("1", "true", "yes")
-            elif isinstance(f.default, tuple):
-                overrides[f.name] = tuple(float(x) for x in raw.split(","))
-            else:
-                overrides[f.name] = float(raw)
-        if overrides:
-            logger.info(f"RouteParams env overrides: {overrides}")
+            if raw is not None:
+                overrides[f.name] = (
+                    raw.strip().lower() in ("1", "true", "yes")
+                    if isinstance(f.default, bool)
+                    else float(raw)
+                )
         return cls(**overrides)
 
 
 # =====================================================================
-# §1 ROAD GEOMETRY — the per-request road network (pure domain logic; the
-# way dicts come from a RoadDataSource, see server/routing/base.py).
+# §1 ROAD GEOMETRY — Intersections & Block Adjacency (Step 1)
 # =====================================================================
-
-
-# ---- data types ----
 
 
 @dataclass(frozen=True)
 class Leg:
-    """One outgoing direction from a position on the network."""
     way_id: int
     along: float
-    direction: int        # +1 = increasing along-offset, -1 = decreasing
-    bearing: float        # compass bearing of travel
+    direction: int
+    bearing: float
     street_name: str
 
 
 @dataclass
 class RoadMarker:
-    """A significant OSM node: intersection, same-street join, or dead end."""
     osm_node_id: int
     lat: float
     lng: float
-    kind: str             # "intersection" | "join" | "dead_end"
+    kind: str  # "intersection" | "join" | "dead_end"
     legs: List[Leg]
     street_names: Tuple[str, ...]
 
@@ -262,15 +151,11 @@ class PathSlice:
     direction: int
     start_dist: float
 
-    @property
-    def length(self) -> float:
-        return abs(self.to_along - self.from_along)
-
 
 @dataclass
 class WalkResult:
     slices: List[PathSlice]
-    end_marker: Optional[RoadMarker]   # decision point reached, None if budget ran out
+    end_marker: Optional[RoadMarker]
     total_dist: float
 
 
@@ -282,13 +167,19 @@ class _Way:
     length: float
     name: str
     node_alongs: List[Tuple[float, int]]
-    xy: List[Tuple[float, float]] = field(default_factory=list)
+
+
+def _next_marker(markers: List[Tuple[float, int]], along: float, direction: int) -> Optional[Tuple[float, int]]:
+    if direction > 0:
+        i = bisect_right(markers, (along + 0.1, 1 << 62))
+        return markers[i] if i < len(markers) else None
+    i = bisect_left(markers, (along - 0.1, -1)) - 1
+    return markers[i] if i >= 0 else None
 
 
 class RoadNetwork:
-    """Per-request container: parse one ways response, answer geometry
-    questions about it, get garbage-collected. No cross-request state
-    (ledger #6)."""
+    """Parses OSM ways, merges multi-node junctions into unified intersection
+    clusters, and walks along streets across degree-2 joins."""
 
     def __init__(self, params: Optional[RouteParams] = None):
         self.p = params or RouteParams()
@@ -297,10 +188,8 @@ class RoadNetwork:
         self._node_coords: Dict[int, Tuple[float, float]] = {}
         self._markers: Dict[int, RoadMarker] = {}
         self._way_markers: Dict[int, List[Tuple[float, int]]] = {}
-        self._cluster_rep: Dict[int, int] = {}   # marker id -> representative id
+        self._cluster_rep: Dict[int, int] = {}
         self._cluster_members: Dict[int, List[int]] = defaultdict(list)
-
-    # ---- integration ----
 
     def add_ways(self, overpass_ways: List[dict]) -> int:
         touched_nodes: set = set()
@@ -316,12 +205,7 @@ class RoadNetwork:
             for (a_lat, a_lng), (b_lat, b_lng) in zip(pts[:-1], pts[1:]):
                 offsets.append(offsets[-1] + calculate_distance(a_lat, a_lng, b_lat, b_lng))
             name = (way.get("tags") or {}).get("name") or ""
-            w = _Way(way_id=way_id, pts=pts, offsets=offsets, length=offsets[-1],
-                     name=name, node_alongs=sorted(zip(offsets, osm_nodes)))
-            origin_lat, origin_lng = pts[0]
-            lng_scale = M_PER_DEG_LAT * math.cos(math.radians(origin_lat))
-            w.xy = [((lng - origin_lng) * lng_scale, (lat - origin_lat) * M_PER_DEG_LAT)
-                    for (lat, lng) in pts]
+            w = _Way(way_id, pts, offsets, offsets[-1], name, sorted(zip(offsets, osm_nodes)))
             self._ways[way_id] = w
             for along, nid in w.node_alongs:
                 self._node_ways[nid].setdefault(way_id, []).append(along)
@@ -330,52 +214,97 @@ class RoadNetwork:
             touched_nodes.update(osm_nodes)
             added += 1
 
-        affected_ways: set = set()
         for nid in touched_nodes:
-            if self._rebuild_marker(nid):
-                affected_ways.update(self._node_ways[nid].keys())
-        for way_id in affected_ways | set(self._ways.keys()):
-            self._rebuild_way_markers(way_id)
+            self._rebuild_marker(nid)
+        for way_id, w in self._ways.items():
+            self._way_markers[way_id] = sorted((along, nid) for along, nid in w.node_alongs if nid in self._markers)
         self._rebuild_clusters()
         return added
 
-    def _rebuild_clusters(self) -> None:
-        """Union-find over decision markers within junction_merge_m of each
-        other [user]. The representative (lowest OSM id — deterministic)
-        stands in for the whole junction wherever a landing or a label is
-        needed."""
-        decision = [m for m in self._markers.values() if m.kind != "join"]
-        parent = {m.osm_node_id: m.osm_node_id for m in decision}
+    def _should_merge_markers(self, a: RoadMarker, b: RoadMarker) -> bool:
+        d = calculate_distance(a.lat, a.lng, b.lat, b.lng)
+        if d > self.p.junction_merge_m:
+            return False
+        if d <= 6.0:
+            return True
+        shared_ways = set(self._node_ways.get(a.osm_node_id, ())) & set(self._node_ways.get(b.osm_node_id, ()))
+        if d <= 20.0:
+            for wid in shared_ways:
+                w = self._ways.get(wid)
+                if w and w.length <= 65.0 and (not w.name or w.pts[0] == w.pts[-1]):
+                    return True
+        sa = {s for s in a.street_names if s}
+        sb = {s for s in b.street_names if s}
+        if len(sa) >= 2 and sa == sb:
+            for sname in sa:
+                wa = {l.way_id for l in a.legs if l.street_name == sname}
+                wb = {l.way_id for l in b.legs if l.street_name == sname}
+                if len(wa) >= 1 and len(wb) >= 1 and not (wa & wb):
+                    return True
+        return False
 
-        def find(x):
+    def _rebuild_clusters(self) -> None:
+        decision = [m for m in self._markers.values() if m.kind == "intersection"]
+        parent = {m.osm_node_id: m.osm_node_id for m in decision}
+        members_by_root: Dict[int, List[RoadMarker]] = {m.osm_node_id: [m] for m in decision}
+
+        def find(x: int) -> int:
             while parent[x] != x:
                 parent[x] = parent[parent[x]]
                 x = parent[x]
             return x
 
-        for i, a in enumerate(decision):
-            for b in decision[i + 1:]:
-                if calculate_distance(a.lat, a.lng, b.lat, b.lng) <= self.p.junction_merge_m:
-                    ra, rb = find(a.osm_node_id), find(b.osm_node_id)
-                    if ra != rb:
-                        parent[max(ra, rb)] = min(ra, rb)
+        pairs = sorted(
+            (
+                (calculate_distance(a.lat, a.lng, b.lat, b.lng), a, b)
+                for i, a in enumerate(decision)
+                for b in decision[i + 1 :]
+                if self._should_merge_markers(a, b)
+            ),
+            key=lambda item: (item[0], item[1].osm_node_id, item[2].osm_node_id),
+        )
+        for _, a, b in pairs:
+            ra, rb = find(a.osm_node_id), find(b.osm_node_id)
+            if ra == rb:
+                continue
+            combined = members_by_root[ra] + members_by_root[rb]
+            if max(calculate_distance(x.lat, x.lng, y.lat, y.lng) for x in combined for y in combined) <= self.p.junction_merge_m:
+                lo, hi = min(ra, rb), max(ra, rb)
+                parent[hi] = lo
+                members_by_root[lo] = combined
+                del members_by_root[hi]
+
         self._cluster_rep = {nid: find(nid) for nid in parent}
         self._cluster_members = defaultdict(list)
         for nid, rep in self._cluster_rep.items():
             self._cluster_members[rep].append(nid)
 
     def junction_of(self, marker: RoadMarker) -> RoadMarker:
-        rep_id = self._cluster_rep.get(marker.osm_node_id, marker.osm_node_id)
-        return self._markers.get(rep_id, marker)
+        return self._markers.get(self._cluster_rep.get(marker.osm_node_id, marker.osm_node_id), marker)
 
     def junction_legs(self, marker: RoadMarker) -> List[Leg]:
         rep_id = self._cluster_rep.get(marker.osm_node_id, marker.osm_node_id)
-        legs: List[Leg] = []
-        for member_id in self._cluster_members.get(rep_id, [marker.osm_node_id]):
-            member = self._markers.get(member_id)
-            if member is not None:
-                legs.extend(member.legs)
-        return legs
+        members = set(self._cluster_members.get(rep_id, [marker.osm_node_id]))
+        raw_legs = [leg for mid in members if mid in self._markers for leg in self._markers[mid].legs]
+        if len(members) <= 1:
+            return raw_legs
+        external_legs: List[Leg] = []
+        for leg in raw_legs:
+            markers = self._way_markers.get(leg.way_id, [])
+            w_leg = self._ways.get(leg.way_id)
+            if (
+                w_leg and w_leg.length <= 65.0 and len(w_leg.pts) >= 3 and w_leg.pts[0] == w_leg.pts[-1]
+                and markers and all(m_nid in members or (self._markers.get(m_nid) and self._markers[m_nid].kind == "join") for _, m_nid in markers)
+            ):
+                continue
+            nxt = _next_marker(markers, leg.along, leg.direction)
+            if nxt is not None and nxt[1] in members and abs(nxt[0] - leg.along) <= self.p.junction_merge_m * 1.5:
+                continue
+            fwd_check = self.walk(leg.way_id, leg.along, leg.direction, 60.0)
+            if fwd_check.end_marker is not None and fwd_check.end_marker.osm_node_id in members:
+                continue
+            external_legs.append(leg)
+        return external_legs or raw_legs
 
     def _rebuild_marker(self, osm_node_id: int) -> bool:
         occurrences = self._node_ways.get(osm_node_id) or {}
@@ -398,115 +327,37 @@ class RoadNetwork:
             return False
         if len(legs) == 1:
             kind = "dead_end"
-        elif len(legs) == 2 and len({l.street_name for l in legs}) == 1:
+        elif len(legs) == 2 and (
+            len({l.street_name for l in legs}) == 1
+            or (
+                _ang_diff(legs[0].bearing, (legs[1].bearing + 180.0) % 360.0) <= 25.0
+                and (
+                    not legs[0].street_name
+                    or not legs[1].street_name
+                    or any(k in (l.street_name or "").casefold() for l in legs for k in ("bridge", "tunnel", "viaduct", "overpass"))
+                )
+            )
+        ):
             kind = "join"
         else:
             kind = "intersection"
         lat, lng = self._node_coords[osm_node_id]
-        seen = set()
+        seen: set = set()
         uniq = tuple(n for n in names if not (n in seen or seen.add(n)))
-        self._markers[osm_node_id] = RoadMarker(
-            osm_node_id=osm_node_id, lat=lat, lng=lng, kind=kind, legs=legs, street_names=uniq,
-        )
+        self._markers[osm_node_id] = RoadMarker(osm_node_id, lat, lng, kind, legs, uniq)
         return True
-
-    def _rebuild_way_markers(self, way_id: int) -> None:
-        w = self._ways.get(way_id)
-        if w is not None:
-            self._way_markers[way_id] = sorted(
-                (along, nid) for along, nid in w.node_alongs if nid in self._markers
-            )
-
-    # ---- accessors ----
-
-    def way(self, way_id: int) -> Optional[_Way]:
-        return self._ways.get(way_id)
 
     def marker(self, osm_node_id: int) -> Optional[RoadMarker]:
         return self._markers.get(osm_node_id)
 
-    def markers_in_bbox(self, min_lat, max_lat, min_lng, max_lng) -> List[RoadMarker]:
-        return [m for m in self._markers.values()
-                if min_lat <= m.lat <= max_lat and min_lng <= m.lng <= max_lng]
-
-    def way_street_name(self, way_id: int) -> str:
-        w = self._ways.get(way_id)
-        return w.name if w else ""
-
-    # ---- geometry ----
-
-    def point_at(self, way_id: int, along: float) -> Tuple[float, float]:
-        w = self._ways[way_id]
-        i = max(0, min(bisect_right(w.offsets, along) - 1, len(w.pts) - 2))
-        seg = w.offsets[i + 1] - w.offsets[i]
-        frac = max(0.0, min(1.0, (along - w.offsets[i]) / seg if seg > 0 else 0.0))
-        lat = w.pts[i][0] + (w.pts[i + 1][0] - w.pts[i][0]) * frac
-        lng = w.pts[i][1] + (w.pts[i + 1][1] - w.pts[i][1]) * frac
-        return lat, lng
-
     def bearing_at(self, way_id: int, along: float, direction: int) -> float:
         w = self._ways[way_id]
-        i = max(0, min(bisect_right(w.offsets, min(along, w.length - 0.01)) - 1, len(w.xy) - 2))
-        dx = w.xy[i + 1][0] - w.xy[i][0]
-        dy = w.xy[i + 1][1] - w.xy[i][1]
-        if direction < 0:
-            dx, dy = -dx, -dy
-        return math.degrees(math.atan2(dx, dy)) % 360.0
+        sample = max(0.01, min(along + (0.05 if direction >= 0 else -0.05), w.length - 0.01))
+        i = max(0, min(bisect_right(w.offsets, sample) - 1, len(w.pts) - 2))
+        p1, p2 = (w.pts[i], w.pts[i + 1]) if direction >= 0 else (w.pts[i + 1], w.pts[i])
+        return _compass_bearing(p1[0], p1[1], p2[0], p2[1])
 
-    def project_to_way(self, way_id: int, lat: float, lng: float) -> Tuple[float, float]:
-        """(signed perpendicular metres, along metres). Positive perp = left of
-        the way's own direction."""
-        w = self._ways[way_id]
-        origin_lat, origin_lng = w.pts[0]
-        lng_scale = M_PER_DEG_LAT * math.cos(math.radians(origin_lat))
-        px = (lng - origin_lng) * lng_scale
-        py = (lat - origin_lat) * M_PER_DEG_LAT
-        best_perp = float("inf")
-        best_signed = float("inf")
-        best_along = 0.0
-        for i, ((x1, y1), (x2, y2)) in enumerate(zip(w.xy[:-1], w.xy[1:])):
-            dx, dy = x2 - x1, y2 - y1
-            seg_sq = dx * dx + dy * dy
-            if seg_sq == 0:
-                continue
-            t = max(0.0, min(1.0, ((px - x1) * dx + (py - y1) * dy) / seg_sq))
-            cx, cy = x1 + t * dx, y1 + t * dy
-            perp = math.hypot(px - cx, py - cy)
-            if perp < best_perp:
-                best_perp = perp
-                cross = dx * (py - y1) - dy * (px - x1)
-                best_signed = perp if cross >= 0 else -perp
-                best_along = w.offsets[i] + t * math.sqrt(seg_sq)
-        return best_signed, best_along
-
-    def locate(self, lat: float, lng: float, max_perp_m: float = 40.0,
-               street_hint: Optional[str] = None) -> Optional[Tuple[int, float, float]]:
-        """Snap to a way: (way_id, along, signed_perp). A street-name hint wins
-        over raw distance — the address already names its street, and nearest-
-        by-distance picks the wrong road for corner buildings."""
-        hint = _norm_street(street_hint) if street_hint else None
-        best_named = None
-        best_any = None
-        for way_id, w in self._ways.items():
-            if not _near_bbox(w.pts, lat, lng, max_perp_m):
-                continue
-            signed, along = self.project_to_way(way_id, lat, lng)
-            if abs(signed) > max_perp_m:
-                continue
-            entry = (way_id, along, signed)
-            if best_any is None or abs(signed) < abs(best_any[2]):
-                best_any = entry
-            if hint and _norm_street(w.name) == hint:
-                if best_named is None or abs(signed) < abs(best_named[2]):
-                    best_named = entry
-        return best_named or best_any
-
-    # ---- the arc-walk ----
-
-    def walk(self, way_id: int, along: float, direction: int, max_dist: float,
-             max_hops: int = 20) -> WalkResult:
-        """Advance up to `max_dist` metres, crossing same-street joins, stopping
-        at decision points or when the loaded geometry runs out."""
+    def walk(self, way_id: int, along: float, direction: int, max_dist: float, max_hops: int = 20) -> WalkResult:
         slices: List[PathSlice] = []
         dist = 0.0
         cur_way, cur_along, cur_dir = way_id, along, direction
@@ -514,13 +365,11 @@ class RoadNetwork:
             w = self._ways.get(cur_way)
             if w is None:
                 break
-            markers = self._way_markers.get(cur_way, [])
-            nxt = _next_marker(markers, cur_along, cur_dir)
+            nxt = _next_marker(self._way_markers.get(cur_way, []), cur_along, cur_dir)
             target = nxt[0] if nxt is not None else (w.length if cur_dir > 0 else 0.0)
             seg_len = abs(target - cur_along)
             if dist + seg_len >= max_dist:
-                end = cur_along + cur_dir * (max_dist - dist)
-                slices.append(PathSlice(cur_way, cur_along, end, cur_dir, dist))
+                slices.append(PathSlice(cur_way, cur_along, cur_along + cur_dir * (max_dist - dist), cur_dir, dist))
                 return WalkResult(slices, None, max_dist)
             if seg_len > 0:
                 slices.append(PathSlice(cur_way, cur_along, target, cur_dir, dist))
@@ -533,574 +382,608 @@ class RoadNetwork:
                 continue
             if marker.is_decision_point():
                 return WalkResult(slices, marker, dist)
-            arrived_by = None
-            onward = None
-            for leg in marker.legs:
-                if leg.way_id == cur_way and abs(leg.along - target) < 0.6 and leg.direction == -cur_dir:
-                    arrived_by = leg
-                else:
-                    onward = leg
+            arrived_by = next((l for l in marker.legs if l.way_id == cur_way and abs(l.along - target) < 0.6 and l.direction == -cur_dir), None)
+            onward = next((l for l in marker.legs if l is not arrived_by), None)
             if onward is None or arrived_by is None:
                 return WalkResult(slices, marker, dist)
             cur_way, cur_along, cur_dir = onward.way_id, onward.along, onward.direction
         return WalkResult(slices, None, dist)
 
 
-def _next_marker(markers: List[Tuple[float, int]], along: float, direction: int
-                 ) -> Optional[Tuple[float, int]]:
-    if direction > 0:
-        i = bisect_right(markers, (along + 0.1, 1 << 62))
-        return markers[i] if i < len(markers) else None
-    i = bisect_left(markers, (along - 0.1, -1)) - 1
-    return markers[i] if i >= 0 else None
-
-
-def _near_bbox(pts: List[Tuple[float, float]], lat: float, lng: float, pad_m: float) -> bool:
-    pad = pad_m / M_PER_DEG_LAT * 1.5
-    return (min(p[0] for p in pts) - pad <= lat <= max(p[0] for p in pts) + pad
-            and min(p[1] for p in pts) - pad <= lng <= max(p[1] for p in pts) + pad)
-
-
-def _norm_street(name: Optional[str]) -> str:
-    return (name or "").strip().casefold()
-
-
 # =====================================================================
-# §2 IMAGERY WINDOWS — tight per-decision reads over Mapillary (ledger #2).
+# §2 5-STEP SEQUENCE GRAPH SOLVER (Steps 2–5)
 # =====================================================================
-
-
-@dataclass(frozen=True)
-class WayImage:
-    along: float
-    perp: float                # signed, way frame (positive = left of way direction)
-    meta: LocationMetadata
-
-
-class AreaSnapshot:
-    """Roads + imagery for one request, fetched on demand, discarded after.
-    This layer knows nothing about steps, seeds, or junctions — it answers
-    `candidates(way_id, along_lo, along_hi)` and fetches exactly that window
-    on demand. Selection logic (§3) depends on it, never the reverse."""
-
-    def __init__(self, roads: RoadNetwork, images: List[LocationMetadata], provider=None,
-                 params: Optional[RouteParams] = None, visited_image_ids: Optional[Set[str]] = None):
-        self.p = params or getattr(roads, "p", None) or RouteParams()
-        self.roads = roads
-        self.images = list(images)
-        self.provider = provider
-        self.visited_image_ids: Set[str] = set(visited_image_ids or [])
-        self._image_ids = {m.imageId for m in self.images}
-        self._fetched_windows: Dict[int, List[Tuple[float, float]]] = {}
-        self._way_proj: Dict[int, List[WayImage]] = {}
-
-    def _ensure_window(self, way_id: int, along_lo: float, along_hi: float) -> None:
-        """Fetch imagery for exactly this along-window of this way — the tight,
-        per-decision window of ledger #2. Boxes stay in the measured-exact size
-        class (<=~60 m); nothing is prefetched."""
-        if self.provider is None:
-            return
-        covered = self._fetched_windows.setdefault(way_id, [])
-        # subtract already-fetched intervals
-        want = [(max(along_lo, 0.0), along_hi)]
-        for (a, b) in covered:
-            nxt = []
-            for (lo, hi) in want:
-                if hi <= a or lo >= b:          # no overlap
-                    nxt.append((lo, hi))
-                else:                            # clip out [a, b]
-                    if lo < a:
-                        nxt.append((lo, a))
-                    if hi > b:
-                        nxt.append((b, hi))
-            want = [(lo, hi) for (lo, hi) in nxt if hi - lo > 0.5]
-        if not want:
-            return
-        w = self.roads.way(way_id)
-        if w is None:
-            return
-        pad = (self.p.perp_max_m + 5) / M_PER_DEG_LAT
-        t0 = time.time()
-        for (lo, hi) in want:
-            window_key = (way_id, round(lo, 1), round(hi, 1))
-            metas = window_cache.get(window_key)
-            if metas is None:
-                pts = [self.roads.point_at(way_id, a) for a in
-                       [lo + i * 15.0 for i in range(int((hi - lo) // 15) + 1)] + [hi]]
-                min_lat = min(p[0] for p in pts) - pad
-                max_lat = max(p[0] for p in pts) + pad
-                min_lng = min(p[1] for p in pts) - pad * 1.5
-                max_lng = max(p[1] for p in pts) + pad * 1.5
-                metas = self.provider.get_metadata_bbox(min_lat, min_lng, max_lat, max_lng) or []
-                window_cache.put(window_key, metas)
-            new = [m for m in metas if m.imageId not in self._image_ids]
-            if new:
-                self.images.extend(new)
-                self._image_ids.update(m.imageId for m in new)
-                self._way_proj.clear()
-            covered.append((lo, hi))
-        logger.info(f"window fetch way {way_id} [{along_lo:.0f},{along_hi:.0f}]m "
-                    f"({len(want)} boxes, {time.time() - t0:.1f}s)")
-
-    def way_images(self, way_id: int) -> List[WayImage]:
-        cached = self._way_proj.get(way_id)
-        if cached is not None:
-            return cached
-        w = self.roads.way(way_id)
-        out: List[WayImage] = []
-        if w is not None:
-            pad = (self.p.perp_max_m + 10) / M_PER_DEG_LAT
-            min_lat = min(p[0] for p in w.pts) - pad
-            max_lat = max(p[0] for p in w.pts) + pad
-            min_lng = min(p[1] for p in w.pts) - pad * 1.5
-            max_lng = max(p[1] for p in w.pts) + pad * 1.5
-            for meta in self.images:
-                if self.p.panos_only and not meta.isPano:
-                    continue  # ledger #3: flat photos hijack the heading
-                ilat, ilng = meta.coordinates.latitude, meta.coordinates.longitude
-                if not (min_lat <= ilat <= max_lat and min_lng <= ilng <= max_lng):
-                    continue
-                perp, along = self.roads.project_to_way(way_id, ilat, ilng)
-                if abs(perp) <= self.p.perp_max_m:
-                    out.append(WayImage(along=along, perp=perp, meta=meta))
-            out.sort(key=lambda wi: (wi.along, wi.meta.imageId))
-        self._way_proj[way_id] = out
-        return out
-
-    def candidates(self, way_id: int, lo: float, hi: float) -> List[WayImage]:
-        self._ensure_window(way_id, lo, hi)
-        imgs = self.way_images(way_id)
-        alongs = [wi.along for wi in imgs]
-        return imgs[bisect_left(alongs, lo):bisect_right(alongs, hi)]
-
-    def image_by_id(self, image_id: str) -> Optional[LocationMetadata]:
-        for meta in self.images:
-            if meta.imageId == image_id:
-                return meta
-        return None
-
-
-# =====================================================================
-# §3 SELECTION — the user's seed/step/turn algorithm (ledger #1), literally.
-# =====================================================================
-
-
-def lane_of(p: RouteParams, travel_perp: float) -> str:
-    """Lane class in the travel frame. Positive perpendicular = left of travel."""
-    if travel_perp <= -p.center_half_width_m:
-        return "right"
-    if travel_perp >= p.center_half_width_m:
-        return "left"
-    return "center"
-
-
-def capture_radius(p: RouteParams, block_length_m: float) -> float:
-    """[user] min(cap, block/2): the zone around an intersection where no
-    waypoint may exist — it belongs to the intersection."""
-    return min(p.capture_max_m, block_length_m / 2 if block_length_m > 0 else p.capture_max_m)
-
-
-def _capture_ms(meta: LocationMetadata) -> int:
-    try:
-        return int(meta.captureTime)
-    except (TypeError, ValueError):
-        return 0
 
 
 @dataclass
 class NodePlace:
     node_id: str
-    kind: str                  # "waypoint" | "intersection"
+    kind: str  # "intersection" | "waypoint"
     lat: float
     lng: float
-    way_id: Optional[int] = None
-    along: Optional[float] = None
-    marker: Optional[RoadMarker] = None
+    image: Optional[LocationMetadata] = None
     street_names: Tuple[str, ...] = ()
+    osm_node_id: Optional[int] = None
 
 
-@dataclass
-class LinkOut:
+@dataclass(frozen=True)
+class OutLink:
     node_id: str
+    bearing: float
+    distance_m: float
     lat: float
     lng: float
-    bearing: float             # travel bearing leaving the current node
-    arrival_bearing: float     # road tangent at the landing, same travel sense
-    distance_m: float
     street_name: str
     image: Optional[LocationMetadata]
-    lane: Optional[str]
+    arrival_bearing: Optional[float] = None
 
 
-# ---- node placement ----
+@dataclass(frozen=True)
+class Seed:
+    place: NodePlace
+    image: LocationMetadata
 
 
-def _junction_place(snap: AreaSnapshot, marker: RoadMarker) -> NodePlace:
-    """[user] intersections within junction_merge_m merge: the representative
-    marker stands in for the whole junction."""
-    rep = snap.roads.junction_of(marker)
-    names = []
-    for leg in snap.roads.junction_legs(rep):
-        if leg.street_name and leg.street_name not in names:
-            names.append(leg.street_name)
-    return NodePlace(node_id=f"osm_{rep.osm_node_id}", kind="intersection",
-                     lat=rep.lat, lng=rep.lng, marker=rep, street_names=tuple(names))
+class AreaSnapshot:
+    """Solves the local navigation graph around a position using the 5-step
+    Intersections + Direct Sequence Slices algorithm."""
+
+    def __init__(
+        self,
+        roads: RoadNetwork,
+        images: List[LocationMetadata],
+        provider=None,
+        params: Optional[RouteParams] = None,
+        visited_image_ids: Optional[Set[str]] = None,
+        broken_image_ids: Optional[Set[str]] = None,
+        active_sequences: Optional[List[str]] = None,
+    ):
+        self.p = params or getattr(roads, "p", None) or RouteParams()
+        self.roads = roads
+        self.images: List[LocationMetadata] = []
+        self._image_ids: Set[str] = set()
+        self.provider = provider
+        self.visited_image_ids: Set[str] = set(visited_image_ids or [])
+        self.broken_image_ids: Set[str] = set(broken_image_ids or [])
+        self.active_sequences: List[str] = active_sequences if active_sequences is not None else []
+        self._expanded_sequences: Set[str] = set()
+        self._fetched_junctions: Set[int] = set()
+        self._discovered_cids: Set[int] = set()
+
+        self._solved: bool = False
+        self.clusters: Dict[int, dict] = {}
+        self.adjacent_pairs: Dict[Tuple[int, int], str] = {}
+        self.chosen_passes: Dict[Tuple[int, int], dict] = {}
+        self.canonical_inter_frame: Dict[int, LocationMetadata] = {}
+        self.nodes: Dict[str, NodePlace] = {}
+        self.adj: Dict[str, List[OutLink]] = defaultdict(list)
+
+        if images:
+            self._ingest_metas(images)
+
+    def _provider_name(self) -> str:
+        return getattr(self.provider, "provider_name", None) or self.provider.__class__.__name__ if self.provider else "none"
+
+    def _ingest_metas(self, metas: List[LocationMetadata]) -> None:
+        for m in metas:
+            if m.imageId and m.imageId not in self._image_ids and m.imageId not in self.broken_image_ids:
+                if (not self.p.panos_only or m.isPano) and m.coordinates is not None:
+                    self.images.append(m)
+                    self._image_ids.add(m.imageId)
+                    self._solved = False
+
+    def expand_sequence(self, seq_id: Optional[str], cache_only: bool = False) -> int:
+        if not seq_id or self.provider is None or str(seq_id) in self._expanded_sequences:
+            return 0
+        seq_str = str(seq_id)
+        seq_key = (self._provider_name(), "seq", seq_str)
+        cached_raw = window_cache.get(seq_key)
+        if cached_raw is not None:
+            query_audit.record_cache_hit("sequence")
+            metas = [LocationMetadata(**d) if isinstance(d, dict) else d for d in cached_raw]
+        elif not cache_only and hasattr(self.provider, "get_sequence"):
+            res = self.provider.get_sequence(seq_str)
+            if not isinstance(res, list):
+                self._expanded_sequences.add(seq_str)
+                return 0
+            metas = res
+            if window_cache.get(seq_key) is None:
+                window_cache.put(seq_key, [m.model_dump() if hasattr(m, "model_dump") else m for m in metas])
+        else:
+            return 0
+        self._expanded_sequences.add(seq_str)
+        if metas:
+            self._ingest_metas(metas)
+        return len(metas)
+
+    def ensure_junction(self, cid: int, c_lat: float, c_lng: float, cache_only: bool = False) -> List[LocationMetadata]:
+        if self.provider is None:
+            return []
+        j_key = (self._provider_name(), "junction_v3", cid)
+        cached = window_cache.get(j_key)
+        if cached is not None:
+            query_audit.record_cache_hit("window")
+            metas = [LocationMetadata(**d) if isinstance(d, dict) else d for d in cached]
+            self._ingest_metas(metas)
+            self._fetched_junctions.add(cid)
+            return metas
+        if cache_only or cid in self._fetched_junctions:
+            return []
+        self._fetched_junctions.add(cid)
+        d_lat = self.p.capture_max_m / M_PER_DEG_LAT
+        d_lng = self.p.capture_max_m / (M_PER_DEG_LAT * max(math.cos(math.radians(c_lat)), 0.1))
+        metas = self.provider.get_metadata_bbox(c_lat - d_lat, c_lng - d_lng, c_lat + d_lat, c_lng + d_lng) or []
+        window_cache.put(j_key, [m.model_dump() if hasattr(m, "model_dump") else m for m in metas])
+        self._ingest_metas(metas)
+        return metas
+
+    def _build_clusters_and_adjacency(self) -> None:
+        self.clusters.clear()
+        self.adjacent_pairs.clear()
+        inter_markers = [m for m in self.roads._markers.values() if m.kind == "intersection"]
+        use_kinds = {"intersection"} if len(inter_markers) >= 2 else {"intersection", "dead_end"}
+
+        for m in self.roads._markers.values():
+            if m.kind not in use_kinds:
+                continue
+            rep = self.roads.junction_of(m) if m.kind == "intersection" else m
+            if rep.osm_node_id not in self.clusters:
+                member_ids = self.roads._cluster_members.get(rep.osm_node_id, [rep.osm_node_id])
+                members = [self.roads._markers[mid] for mid in member_ids if mid in self.roads._markers]
+                legs = self.roads.junction_legs(rep) if m.kind == "intersection" else list(rep.legs)
+                self.clusters[rep.osm_node_id] = {
+                    "id": f"osm_{rep.osm_node_id}",
+                    "rep_id": rep.osm_node_id,
+                    "lat": sum(x.lat for x in members) / len(members),
+                    "lng": sum(x.lng for x in members) / len(members),
+                    "streets": sorted({l.street_name for l in legs if l.street_name}),
+                    "legs": legs,
+                }
+
+        for cid, c in self.clusters.items():
+            for leg in c["legs"]:
+                w_res = self.roads.walk(leg.way_id, leg.along, leg.direction, 600.0)
+                if w_res.end_marker is not None:
+                    em = w_res.end_marker
+                    rep_cid = self.roads.junction_of(em).osm_node_id if em.kind == "intersection" else em.osm_node_id
+                    if rep_cid != cid and rep_cid in self.clusters:
+                        pair_key = (min(cid, rep_cid), max(cid, rep_cid))
+                        if pair_key not in self.adjacent_pairs or (not self.adjacent_pairs[pair_key] and leg.street_name):
+                            self.adjacent_pairs[pair_key] = leg.street_name or ""
+
+    def discover_and_expand(self, center_lat: float, center_lng: float, radius_m: float = 45.0) -> None:
+        if not self.clusters:
+            self._build_clusters_and_adjacency()
+        if self.provider is None:
+            return
+
+        near_cids = {
+            cid for cid, c in self.clusters.items()
+            if calculate_distance(center_lat, center_lng, c["lat"], c["lng"]) <= radius_m
+        }
+        if not near_cids and self.clusters:
+            near_cids.update(
+                sorted(self.clusters, key=lambda k: calculate_distance(center_lat, center_lng, self.clusters[k]["lat"], self.clusters[k]["lng"]))[:2]
+            )
+        if near_cids.issubset(self._discovered_cids):
+            return
+        self._discovered_cids.update(near_cids)
+
+        neighbor_cids = set(near_cids)
+        for cid_a, cid_b in self.adjacent_pairs:
+            if cid_a in near_cids or cid_b in near_cids:
+                neighbor_cids.update((cid_a, cid_b))
+
+        for cid in neighbor_cids:
+            self.ensure_junction(cid, self.clusters[cid]["lat"], self.clusters[cid]["lng"], cache_only=True)
+
+        missing = [cid for cid in neighbor_cids if cid not in self._fetched_junctions]
+        if len(missing) == 1:
+            c = self.clusters[missing[0]]
+            self.ensure_junction(missing[0], c["lat"], c["lng"], cache_only=False)
+        elif len(missing) > 1:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(missing))) as ex:
+                for f in [ex.submit(self.ensure_junction, cid, self.clusters[cid]["lat"], self.clusters[cid]["lng"], False) for cid in missing]:
+                    try:
+                        f.result()
+                    except Exception as e:
+                        logger.debug(f"Junction bbox fetch failed: {e}")
+
+        for sid in list({m.sequenceId for m in self.images if m.sequenceId}):
+            self.expand_sequence(sid, cache_only=True)
+
+        if not hasattr(self.provider, "get_sequence"):
+            return
+
+        seq_dist_at: Dict[int, Dict[str, float]] = defaultdict(dict)
+        for m in self.images:
+            if not m.sequenceId or m.coordinates is None or (self.p.panos_only and not m.isPano):
+                continue
+            sid = str(m.sequenceId)
+            mlat, mlng = m.coordinates.latitude, m.coordinates.longitude
+            for cid in neighbor_cids:
+                d = calculate_distance(mlat, mlng, self.clusters[cid]["lat"], self.clusters[cid]["lng"])
+                if d <= self.p.capture_max_m and d < seq_dist_at[cid].get(sid, float("inf")):
+                    seq_dist_at[cid][sid] = d
+
+        to_expand: List[str] = []
+        for cid_a, cid_b in self.adjacent_pairs:
+            if cid_a not in near_cids and cid_b not in near_cids:
+                continue
+            shared = set(seq_dist_at[cid_a]) & set(seq_dist_at[cid_b])
+            ranked = sorted(shared, key=lambda s: seq_dist_at[cid_a][s] + seq_dist_at[cid_b][s] - (10.0 if s in self.active_sequences else 0.0))
+            for sid in ranked[:2]:
+                if sid not in self._expanded_sequences and sid not in to_expand:
+                    to_expand.append(sid)
+
+        if not to_expand and not any(
+            (set(seq_dist_at[a]) & set(seq_dist_at[b])) & self._expanded_sequences
+            for a, b in self.adjacent_pairs if a in near_cids or b in near_cids
+        ):
+            fallback = {
+                sid: min(seq_dist_at[cid][sid] for cid in near_cids if sid in seq_dist_at[cid])
+                for cid in near_cids for sid in seq_dist_at[cid] if sid not in self._expanded_sequences
+            }
+            to_expand.extend(sid for sid, _ in sorted(fallback.items(), key=lambda kv: kv[1])[:2])
+
+        if len(to_expand) == 1:
+            self.expand_sequence(to_expand[0], cache_only=False)
+        elif len(to_expand) > 1:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(to_expand))) as ex:
+                for f in [ex.submit(self.expand_sequence, sid, False) for sid in to_expand]:
+                    try:
+                        f.result()
+                    except Exception as e:
+                        logger.debug(f"Sequence expansion failed: {e}")
+
+    def solve(self, center_lat: Optional[float] = None, center_lng: Optional[float] = None, radius_m: float = 45.0) -> None:
+        if not self.clusters:
+            self._build_clusters_and_adjacency()
+        if center_lat is not None and center_lng is not None and self.provider is not None:
+            self.discover_and_expand(center_lat, center_lng, radius_m=radius_m)
+        if self._solved:
+            return
+
+        self.chosen_passes.clear()
+        self.canonical_inter_frame.clear()
+        self.nodes.clear()
+        self.adj.clear()
+
+        sequences: Dict[str, List[LocationMetadata]] = defaultdict(list)
+        none_seq_frames: List[LocationMetadata] = []
+        for m in self.images:
+            if m.imageId not in self.broken_image_ids and m.coordinates is not None and (not self.p.panos_only or m.isPano):
+                (sequences[str(m.sequenceId)] if m.sequenceId else none_seq_frames).append(m)
+
+        for sid in list(sequences):
+            frames = list({f.imageId: f for f in sequences[sid]}.values())
+            if len(frames) < 2:
+                del sequences[sid]
+            else:
+                frames.sort(key=lambda x: (str(x.captureTime or ""), x.imageId))
+                sequences[sid] = frames
+
+        if len(none_seq_frames) >= 2:
+            sequences["__synthetic__"] = sorted(
+                {f.imageId: f for f in none_seq_frames}.values(),
+                key=lambda x: (round(x.coordinates.latitude, 6), round(x.coordinates.longitude, 6), str(x.captureTime or ""), x.imageId),
+            )
+
+        inter_radius_m = self.p.capture_max_m
+        passes_by_pair: Dict[Tuple[int, int], List[dict]] = defaultdict(list)
+
+        for sid, frames in sequences.items():
+            visits_by_cid: Dict[int, List[List[Tuple[int, float]]]] = defaultdict(list)
+            for idx, f in enumerate(frames):
+                lat, lng = f.coordinates.latitude, f.coordinates.longitude
+                for cid, c in self.clusters.items():
+                    d = calculate_distance(lat, lng, c["lat"], c["lng"])
+                    if d <= inter_radius_m:
+                        if visits_by_cid[cid] and idx - visits_by_cid[cid][-1][-1][0] <= 8:
+                            visits_by_cid[cid][-1].append((idx, d))
+                        else:
+                            visits_by_cid[cid].append([(idx, d)])
+
+            visits = sorted(
+                [(cid, *min(g, key=lambda x: x[1])) for cid, groups in visits_by_cid.items() for g in groups],
+                key=lambda x: x[1],
+            )
+            for v_i in range(len(visits)):
+                for v_j in range(v_i + 1, min(len(visits), v_i + 4)):
+                    cid_a, idx_a, d_a = visits[v_i]
+                    cid_b, idx_b, d_b = visits[v_j]
+                    pair_key = (min(cid_a, cid_b), max(cid_a, cid_b))
+                    if cid_a == cid_b or idx_b <= idx_a or pair_key not in self.adjacent_pairs:
+                        continue
+                    if any(cid_m not in (cid_a, cid_b) and idx_a + 3 < idx_m < idx_b - 3 and d_m < 18.0 for cid_m, idx_m, d_m in visits[v_i + 1 : v_j]):
+                        continue
+                    sub_frames = frames[idx_a : idx_b + 1]
+                    steps = [
+                        calculate_distance(f1.coordinates.latitude, f1.coordinates.longitude, f2.coordinates.latitude, f2.coordinates.longitude)
+                        for f1, f2 in zip(sub_frames[:-1], sub_frames[1:])
+                    ]
+                    path_len = sum(steps)
+                    max_step = max(steps, default=0.0)
+                    straight_d = calculate_distance(self.clusters[cid_a]["lat"], self.clusters[cid_a]["lng"], self.clusters[cid_b]["lat"], self.clusters[cid_b]["lng"])
+                    sinuosity = path_len / max(straight_d, 1.0)
+                    if sinuosity > self.p.max_sinuosity or max_step > max(self.p.max_frame_step_m, self.p.step_m * 1.6):
+                        continue
+                    score = abs(sinuosity - 1.0) * 50.0 + (d_a + d_b) + max_step - (5.0 if sid in self.active_sequences else 0.0)
+                    passes_by_pair[pair_key].append({
+                        "seq_id": sid, "cid_a": cid_a, "cid_b": cid_b, "frames": sub_frames,
+                        "path_len": path_len, "score": score,
+                    })
+
+        intersection_endpoint_frames: Dict[int, List[LocationMetadata]] = defaultdict(list)
+        for pair_key, cand_list in sorted(passes_by_pair.items()):
+            best = min(cand_list, key=lambda x: x["score"])
+            frames = best["frames"]
+            cum_d = [0.0]
+            for f1, f2 in zip(frames[:-1], frames[1:]):
+                cum_d.append(cum_d[-1] + calculate_distance(f1.coordinates.latitude, f1.coordinates.longitude, f2.coordinates.latitude, f2.coordinates.longitude))
+            total_d = cum_d[-1]
+            n_steps = max(1, round(total_d / max(self.p.step_m, 5.0)))
+            sampled = [frames[0]]
+            if len(frames) > 2:
+                for k in range(1, n_steps):
+                    best_i = min(range(1, len(frames) - 1), key=lambda i: abs(cum_d[i] - total_d * (k / n_steps)))
+                    if sampled[-1].imageId != frames[best_i].imageId:
+                        sampled.append(frames[best_i])
+            if sampled[-1].imageId != frames[-1].imageId:
+                sampled.append(frames[-1])
+            best["sampled"] = sampled
+            self.chosen_passes[pair_key] = best
+            intersection_endpoint_frames[best["cid_a"]].append(sampled[0])
+            intersection_endpoint_frames[best["cid_b"]].append(sampled[-1])
+
+        for cid, end_frames in intersection_endpoint_frames.items():
+            c = self.clusters[cid]
+            self.canonical_inter_frame[cid] = min(
+                end_frames,
+                key=lambda f: (
+                    sum(calculate_distance(f.coordinates.latitude, f.coordinates.longitude, ef.coordinates.latitude, ef.coordinates.longitude) for ef in end_frames) / len(end_frames)
+                    + 0.5 * calculate_distance(f.coordinates.latitude, f.coordinates.longitude, c["lat"], c["lng"])
+                ),
+            )
+
+        for cid, c in self.clusters.items():
+            f_inter = self.canonical_inter_frame.get(cid)
+            if f_inter is None:
+                near_imgs = [m for m in self.images if calculate_distance(c["lat"], c["lng"], m.coordinates.latitude, m.coordinates.longitude) <= inter_radius_m]
+                if near_imgs:
+                    f_inter = min(near_imgs, key=lambda m: calculate_distance(c["lat"], c["lng"], m.coordinates.latitude, m.coordinates.longitude))
+                    self.canonical_inter_frame[cid] = f_inter
+            node_id = f"osm_{cid}"
+            self.nodes[node_id] = NodePlace(
+                node_id=node_id, kind="intersection",
+                lat=f_inter.coordinates.latitude if f_inter else c["lat"],
+                lng=f_inter.coordinates.longitude if f_inter else c["lng"],
+                image=f_inter, street_names=tuple(c["streets"]), osm_node_id=cid,
+            )
+
+        for pair_key, info in self.chosen_passes.items():
+            street_name = self.adjacent_pairs.get(pair_key, "")
+            node_a, node_b = self.nodes[f"osm_{info['cid_a']}"], self.nodes[f"osm_{info['cid_b']}"]
+            mid_nodes: List[NodePlace] = []
+            for f_mid in info["sampled"][1:-1]:
+                if (node_a.image and f_mid.imageId == node_a.image.imageId) or (node_b.image and f_mid.imageId == node_b.image.imageId):
+                    continue
+                if calculate_distance(node_a.lat, node_a.lng, f_mid.coordinates.latitude, f_mid.coordinates.longitude) < 5.0:
+                    continue
+                if calculate_distance(node_b.lat, node_b.lng, f_mid.coordinates.latitude, f_mid.coordinates.longitude) < 5.0:
+                    continue
+                wp_id = f"seq_{f_mid.imageId}"
+                wp_node = NodePlace(wp_id, "waypoint", f_mid.coordinates.latitude, f_mid.coordinates.longitude, f_mid, (street_name,) if street_name else ())
+                self.nodes[wp_id] = wp_node
+                mid_nodes.append(wp_node)
+
+            chain = [node_a] + mid_nodes + [node_b]
+            info["chain"] = chain
+            for u, v in zip(chain[:-1], chain[1:]):
+                d_uv = round(calculate_distance(u.lat, u.lng, v.lat, v.lng), 1)
+                brg_uv = round(_compass_bearing(u.lat, u.lng, v.lat, v.lng), 1)
+                brg_vu = round(_compass_bearing(v.lat, v.lng, u.lat, u.lng), 1)
+                self.adj[u.node_id].append(OutLink(v.node_id, brg_uv, d_uv, v.lat, v.lng, street_name, v.image, brg_uv))
+                self.adj[v.node_id].append(OutLink(u.node_id, brg_vu, d_uv, u.lat, u.lng, street_name, u.image, brg_vu))
+
+        self._solved = True
+
+
+# =====================================================================
+# §3 GRAPH QUERIES & ROUTE PROVIDER FACADE
+# =====================================================================
 
 
 def place_node(snap: AreaSnapshot, node_id: str) -> Optional[NodePlace]:
+    if not snap._solved:
+        snap.solve()
+    if node_id in snap.nodes:
+        return snap.nodes[node_id]
     if node_id.startswith("osm_"):
         try:
-            marker = snap.roads.marker(int(node_id[4:]))
+            mk = snap.roads.marker(int(node_id[4:]))
         except ValueError:
             return None
-        if marker is None:
-            return None
-        return _junction_place(snap, marker)
-    if node_id.startswith("way_"):
-        try:
-            _, way_str, _, off_str = node_id.split("_", 3)
-            way_id, along = int(way_str), float(off_str)
-        except ValueError:
-            return None
-        w = snap.roads.way(way_id)
-        if w is None:
-            return None
-        along = max(0.0, min(along, w.length))
-        lat, lng = snap.roads.point_at(way_id, along)
-        return NodePlace(node_id=node_id, kind="waypoint", lat=lat, lng=lng,
-                         way_id=way_id, along=along,
-                         street_names=(w.name,) if w.name else ())
-    return None
-
-
-def waypoint_id(way_id: int, along: float) -> str:
-    return f"way_{way_id}_off_{int(round(along))}"
-
-
-def reference_image(snap: AreaSnapshot, place: NodePlace,
-                    image_id: Optional[str] = None) -> Optional[WayImage]:
-    """The image a node displays. The client's declared current image wins;
-    otherwise the nearest image to the node."""
-    p = snap.p
-    if image_id:
-        meta = snap.image_by_id(image_id)
-        if meta is not None:
-            way_id = place.way_id
-            if way_id is None and place.marker is not None and place.marker.legs:
-                way_id = place.marker.legs[0].way_id
-            if way_id is not None and snap.roads.way(way_id) is not None:
-                perp, along = snap.roads.project_to_way(
-                    way_id, meta.coordinates.latitude, meta.coordinates.longitude)
-                return WayImage(along=along, perp=perp, meta=meta)
-    if place.kind == "waypoint":
-        # [user doctrine] expand on empty, doubling — a single tiny read can
-        # flake (proven at way_8071899_off_39: first ±3 m read empty, ±6 m
-        # found 95 panos incl. one at Δ0.0). Overlapping padded fetches
-        # re-sample the ground; nearest wins so no drift when reads are good.
-        for window in p.reference_windows_m:
-            near = snap.candidates(place.way_id, place.along - window, place.along + window)
-            if near:
-                return min(near, key=lambda wi: (abs(wi.along - place.along), wi.meta.imageId))
-        return None
-    return _intersection_image(snap, place.marker, p.capture_max_m)
-
-
-def _intersection_image(snap: AreaSnapshot, marker: RoadMarker,
-                        radius_m: float) -> Optional[WayImage]:
-    """The junction's image comes from the points aggregated INTO the junction:
-    per-arm candidates within the condensing window along each leg. There is
-    deliberately NO distance-to-center test — the geometric center of a
-    crossing is the one place imagery structurally cannot exist (ledger #4:
-    navigability is the goal, not center proximity). Panos first, then closest
-    to the corner along its own arm."""
-    best = None
-    best_key = None
-    for leg in snap.roads.junction_legs(marker):
-        for wi in snap.candidates(leg.way_id, leg.along - radius_m, leg.along + radius_m):
-            key = (not wi.meta.isPano, round(abs(wi.along - leg.along), 1), wi.meta.imageId)
-            if best_key is None or key < best_key:
-                best_key = key
-                best = wi
-    return best
-
-
-# ---- links ----
-
-
-def legs_at(snap: AreaSnapshot, place: NodePlace) -> List[Leg]:
-    if place.kind == "intersection":
-        return snap.roads.junction_legs(place.marker)
-    w = snap.roads.way(place.way_id)
-    if w is None:
-        return []
-    along = max(0.05, min(place.along, w.length - 0.05))
-    return [Leg(place.way_id, along, d, snap.roads.bearing_at(place.way_id, along, d), w.name)
-            for d in (+1, -1)]
-
-
-def build_links(snap: AreaSnapshot, place: NodePlace,
-                ref: Optional[WayImage]) -> List[LinkOut]:
-    links: List[LinkOut] = []
-    for leg in legs_at(snap, place):
-        out = _step(snap, place, leg, ref)
-        if out is not None and out.node_id != place.node_id:
-            links.append(out)
-    return links
-
-
-def _step(snap: AreaSnapshot, place: NodePlace, leg: Leg,
-          ref: Optional[WayImage]) -> Optional[LinkOut]:
-    p = snap.p
-    fwd = snap.roads.walk(leg.way_id, leg.along, leg.direction, p.block_cap_m)
-    dist_dp = fwd.total_dist if fwd.end_marker is not None else None
-    if place.kind == "intersection":
-        block = dist_dp if dist_dp is not None else p.block_cap_m
-    else:
-        back = snap.roads.walk(leg.way_id, leg.along, -leg.direction, p.block_cap_m).total_dist
-        block = (dist_dp if dist_dp is not None else p.block_cap_m) + back
-    cap = capture_radius(p, block)
-    far = (dist_dp - cap) if dist_dp is not None else fwd.total_dist
-
-    # Travel-frame reference perpendicular: where "my lane" is on this leg's way.
-    ref_tp: Optional[float] = None
-    if ref is not None:
-        perp, _ = snap.roads.project_to_way(leg.way_id, ref.meta.coordinates.latitude,
-                                            ref.meta.coordinates.longitude)
-        if abs(perp) <= p.perp_max_m + 5:
-            ref_tp = perp * leg.direction
-
-    def cands_in_pd(lo_pd: float, hi_pd: float) -> List[Tuple[float, float, int, float, WayImage]]:
-        """Candidates with path-distance in (lo_pd, hi_pd] — fetches only the
-        matching tight window on each underlying way."""
-        out = []
-        for sl in fwd.slices:
-            s_lo, s_hi = sl.start_dist, sl.start_dist + sl.length
-            if s_hi <= lo_pd or s_lo > hi_pd:
-                continue
-            a0 = sl.from_along + sl.direction * (max(lo_pd, s_lo) - s_lo)
-            a1 = sl.from_along + sl.direction * (min(hi_pd, s_hi) - s_lo)
-            for wi in snap.candidates(sl.way_id, min(a0, a1), max(a0, a1)):
-                pd = sl.start_dist + (wi.along - sl.from_along) * sl.direction
-                if lo_pd < pd <= hi_pd and (ref is None or wi.meta.imageId != ref.meta.imageId):
-                    out.append((pd, wi.perp * sl.direction, sl.way_id, wi.along, wi))
-        return out
-
-    def link_for(pick) -> LinkOut:
-        pd, tp, way_id, along, wi = pick
-        lat, lng = snap.roads.point_at(way_id, along)
-        return LinkOut(
-            node_id=waypoint_id(way_id, along), lat=lat, lng=lng,
-            bearing=leg.bearing,
-            arrival_bearing=snap.roads.bearing_at(way_id, along, _slice_dir(fwd, way_id, along)),
-            distance_m=pd, street_name=snap.roads.way_street_name(way_id) or leg.street_name,
-            image=wi.meta, lane=lane_of(p, tp),
-        )
-
-    # [user] Same side anywhere in the ray beats the other side anywhere
-    # ("sparse straight line beats dense zigzag"). Within a side: the step
-    # slice first (minimal perpendicular movement), then expand ahead one
-    # window at a time up to the condensing zone. Every window is its own
-    # tight fetch; pass 2 reuses pass 1's fetches from memory.
-    slice_all = cands_in_pd(p.slice_lo, min(p.slice_hi, far)) if far > p.slice_lo else []
-    beyond_all: List[Tuple[float, float, int, float, WayImage]] = []
-    beyond_gathered = False
-
-    def gather_beyond():
-        nonlocal beyond_gathered
-        if beyond_gathered:
-            return
-        lo_pd = p.slice_hi
-        while lo_pd < far:
-            hi_pd = min(lo_pd + p.step_m, far)
-            beyond_all.extend(cands_in_pd(lo_pd, hi_pd))
-            lo_pd = hi_pd
-        beyond_gathered = True
-
-    if ref_tp is not None:
-        pools = [lambda c: lane_of(p, c[1]) == lane_of(p, ref_tp), lambda c: True]
-    else:
-        pools = [lambda c: True]
-    ref_seq = ref.meta.sequenceId if (ref and ref.meta and ref.meta.sequenceId) else None
-    visited_ids = getattr(snap, "visited_image_ids", set())
-
-    for keep in pools:
-        in_slice = [c for c in slice_all if keep(c)]
-        if in_slice:
-            anchor = ref_tp if ref_tp is not None else 0.0
-            prev_matches = [c for c in in_slice if c[4].meta.imageId in visited_ids]
-            if prev_matches:
-                return link_for(min(prev_matches, key=lambda c: (abs(c[1] - anchor), c[0],
-                                                                  c[4].meta.imageId)))
-            if ref_seq:
-                seq_matches = [c for c in in_slice if c[4].meta.sequenceId == ref_seq]
-                if seq_matches:
-                    return link_for(min(seq_matches, key=lambda c: (abs(c[1] - anchor), c[0],
-                                                                    c[4].meta.imageId)))
-            return link_for(min(in_slice, key=lambda c: (abs(c[1] - anchor), c[0],
-                                                         c[4].meta.imageId)))
-        gather_beyond()
-        beyond = [c for c in beyond_all if keep(c)]
-        if beyond:
-            prev_beyond = [c for c in beyond if c[4].meta.imageId in visited_ids]
-            if prev_beyond:
-                return link_for(min(prev_beyond, key=lambda c: (c[0], c[4].meta.imageId)))
-            if ref_seq:
-                seq_beyond = [c for c in beyond if c[4].meta.sequenceId == ref_seq]
-                if seq_beyond:
-                    return link_for(min(seq_beyond, key=lambda c: (c[0], c[4].meta.imageId)))
-            return link_for(min(beyond, key=lambda c: (c[0], c[4].meta.imageId)))
-
-    # [user] (c) the intersection itself — or travel this way is not possible.
-    marker = fwd.end_marker
-    if marker is not None and marker.is_decision_point():
-        jplace = _junction_place(snap, marker)
-        jref = _intersection_image(snap, jplace.marker, cap)
-        if jref is not None:
-            return LinkOut(
-                node_id=jplace.node_id, lat=jplace.lat, lng=jplace.lng,
-                bearing=leg.bearing, arrival_bearing=leg.bearing,
-                distance_m=calculate_distance(place.lat, place.lng, jplace.lat, jplace.lng),
-                street_name=leg.street_name, image=jref.meta,
-                lane=lane_of(p, jref.perp * leg.direction),
+        if mk is not None:
+            rep = snap.roads.junction_of(mk)
+            rep_key = f"osm_{rep.osm_node_id}"
+            return snap.nodes.get(rep_key) or NodePlace(
+                rep_key, "intersection", rep.lat, rep.lng,
+                snap.canonical_inter_frame.get(rep.osm_node_id), rep.street_names, rep.osm_node_id,
             )
+    if node_id.startswith("seq_"):
+        img_id = node_id[4:]
+        for m in snap.images:
+            if m.imageId == img_id:
+                return NodePlace(node_id, "waypoint", m.coordinates.latitude, m.coordinates.longitude, m)
     return None
 
 
-def _slice_dir(walkres, way_id: int, along: float) -> int:
-    for sl in walkres.slices:
-        a_min, a_max = min(sl.from_along, sl.to_along), max(sl.from_along, sl.to_along)
-        if sl.way_id == way_id and a_min - 0.01 <= along <= a_max + 0.01:
-            return sl.direction
-    return +1
+def reference_image(snap: AreaSnapshot, place: NodePlace, image_id: Optional[str] = None) -> Optional[LocationMetadata]:
+    if not snap._solved:
+        snap.solve(place.lat, place.lng)
+    if place.image is not None and place.image.imageId not in snap.broken_image_ids:
+        return place.image
+    if image_id and image_id not in snap.broken_image_ids:
+        for m in snap.images:
+            if m.imageId == image_id:
+                return m
+    return snap.nodes[place.node_id].image if place.node_id in snap.nodes else None
 
 
-# ---- seeding ----
-
-
-@dataclass
-class Seed:
-    place: NodePlace
-    image: WayImage
-    lane: Optional[str]
-
-
-def pick_seed(snap: AreaSnapshot, lat: float, lng: float,
-              street_hint: Optional[str] = None) -> Optional[Seed]:
-    p = snap.p
-    loc = snap.roads.locate(lat, lng, max_perp_m=p.locate_max_perp_m, street_hint=street_hint)
-    if loc is None:
+def pick_seed(snap: AreaSnapshot, lat: float, lng: float, street_hint: Optional[str] = None) -> Optional[Seed]:
+    snap.solve(lat, lng)
+    candidates = [n for n in snap.nodes.values() if n.image is not None and snap.adj.get(n.node_id)] or [
+        n for n in snap.nodes.values() if n.image is not None
+    ]
+    if not candidates and snap.provider is not None:
+        d_lat = 35.0 / M_PER_DEG_LAT
+        d_lng = 35.0 / (M_PER_DEG_LAT * max(math.cos(math.radians(lat)), 0.1))
+        probe = snap.provider.get_metadata_bbox(lat - d_lat, lng - d_lng, lat + d_lat, lng + d_lng) or []
+        snap._ingest_metas(probe)
+        for m in probe:
+            if m.sequenceId:
+                snap.expand_sequence(m.sequenceId, cache_only=False)
+        snap.solve(lat, lng)
+        candidates = [n for n in snap.nodes.values() if n.image is not None and snap.adj.get(n.node_id)] or [
+            n for n in snap.nodes.values() if n.image is not None
+        ]
+    if not candidates:
         return None
-    way_id, along, _ = loc
-
-    # [user] ±1 m window, doubling until anything is found; the first non-empty
-    # window wins and nothing outside it is ever considered.
-    cands: List[WayImage] = []
-    for window in p.seed_windows_m:
-        cands = snap.candidates(way_id, along - window, along + window)
-        if cands:
-            break
-    if not cands:
-        return None
-
-    # [user] right sidewalk (with a continuation point before the next
-    # intersection), then left, then center.
-    fwd = snap.roads.walk(way_id, along, +1, p.block_cap_m)
-    ahead = {lane_of(p, wi.perp) for wi in snap.candidates(
-        way_id, along + 1.0, along + max(fwd.total_dist - p.capture_max_m, 2.0))}
-    by_lane: Dict[str, List[WayImage]] = {"right": [], "left": [], "center": []}
-    for wi in cands:
-        by_lane[lane_of(p, wi.perp)].append(wi)
-    order = [l for l in ("right", "left") if by_lane[l] and l in ahead]
-    order.append("center")
-    order += [l for l in ("right", "left") if l not in order]
-    for lane in order:
-        pool = by_lane[lane]
-        if not pool:
-            continue
-        # Nearest wins outright; pano/recency only break metre-level ties.
-        wi = min(pool, key=lambda c: (round(abs(c.along - along)), not c.meta.isPano,
-                                      -_capture_ms(c.meta), c.meta.imageId))
-        nlat, nlng = snap.roads.point_at(way_id, wi.along)
-        w = snap.roads.way(way_id)
-        place = NodePlace(node_id=waypoint_id(way_id, wi.along), kind="waypoint",
-                          lat=nlat, lng=nlng, way_id=way_id, along=wi.along,
-                          street_names=(w.name,) if w.name else ())
-        return Seed(place=place, image=wi, lane=lane)
-    return None
+    hint_norm = _norm_street(street_hint) if street_hint else ""
+    if hint_norm:
+        named = [
+            n for n in candidates
+            if any(_norm_street(s) == hint_norm for s in n.street_names)
+            and calculate_distance(lat, lng, n.lat, n.lng) <= max(snap.p.locate_max_perp_m, 100.0)
+        ]
+        if named:
+            candidates = named
+    best = min(candidates, key=lambda n: calculate_distance(lat, lng, n.lat, n.lng))
+    return Seed(place=best, image=best.image)
 
 
-# =====================================================================
-# §4 THE PROVIDER — one instantiation (OSM + Mapillary) behind one interface.
-# =====================================================================
+def build_links(snap: AreaSnapshot, place: NodePlace, ref: Optional[LocationMetadata] = None) -> List[OutLink]:
+    if not snap._solved or place.node_id not in snap.adj:
+        snap.solve(place.lat, place.lng)
+    return list(snap.adj.get(place.node_id, []))
 
 
 class RouteProvider:
-    """Stateless request handler (ledger #6). Every request builds a throwaway
-    AreaSnapshot (one roads fetch + tight per-decision imagery windows),
-    answers from it, and discards it. The client caches the nodes it has
-    traversed; the server remembers nothing.
+    """Stateless facade wired into Flask routes (`/v1/streetreader:generatePanoramaView`
+    and `/v1/streetreader:getLocalGraph`)."""
 
-    Constructor seams:
-      imagery       — object with get_metadata_bbox / get_metadata / get_image
-                      (MapillaryProvider in production; StubImageService when
-                      booting without a token).
-      location      — geocoding service (used only to turn addresses into
-                      coordinates plus the street-name hint).
-      params        — RouteParams; defaults to RouteParams.from_env().
-      road_sources  — ordered list of RoadDataSource; a source returning None
-                      passes to the next (see server/services/streetmap).
-                      Defaults to bundled extracts first, Overpass fallback.
-                      Inject a fixture for offline tests.
-    """
-
-    def __init__(self, imagery, location, params: Optional[RouteParams] = None,
-                 road_sources: Optional[List[RoadDataSource]] = None):
+    def __init__(self, imagery, location=None, params: Optional[RouteParams] = None, road_sources: Optional[List[RoadDataSource]] = None):
         self.imagery = imagery
         self.location = location
         self.p = params or RouteParams.from_env()
-        self._road_sources = road_sources or [
-            LocalExtractRoadService(),
-            OverpassRoadService(
-                timeout_s=self.p.overpass_timeout_s,
-                http_timeout_s=getattr(config, "OVERPASS_HTTP_TIMEOUT_S", 30.0),
-                probe_on_init=False,
-            ),
-        ]
+        self.road_sources: List[RoadDataSource] = (
+            road_sources if road_sources is not None else [
+                LocalExtractRoadService(),
+                OsmMapApiRoadService(),
+                OverpassRoadService(timeout_s=self.p.overpass_timeout_s),
+            ]
+        )
+        self.broken_image_ids: Set[str] = set()
         self.visited_image_ids: Set[str] = set()
+        self.active_sequences: List[str] = []
+        self._tile_snapshots: Dict[Tuple[float, float], AreaSnapshot] = {}
 
-    # ---------- shared plumbing ----------
+    def _is_cache_enabled(self) -> bool:
+        return bool(getattr(config, "SERVER_CACHE_ENABLED", True))
 
-    def _snapshot_at(self, lat: float, lng: float) -> AreaSnapshot:
-        dlat = self.p.snapshot_radius_m / M_PER_DEG_LAT
-        dlng = self.p.snapshot_radius_m / (M_PER_DEG_LAT * max(math.cos(math.radians(lat)), 0.1))
-        ways = None
-        last_error = None
-        for source in self._road_sources:
+    def _node_cache_key(self, canonical_node_id: str, image_id: Optional[str] = None) -> Tuple[str, str, str]:
+        prov = getattr(self.imagery, "provider_name", None) or self.imagery.__class__.__name__
+        return (prov, str(canonical_node_id), str(image_id or ""))
+
+    def _fetch_ways(self, lat: float, lng: float, radius_m: float) -> List[dict]:
+        tile_deg = 0.004
+        t_lat, t_lng = round(round(lat / tile_deg) * tile_deg, 5), round(round(lng / tile_deg) * tile_deg, 5)
+        cache_radius = max(radius_m, 250.0)
+        d_lat = cache_radius / M_PER_DEG_LAT
+        d_lng = cache_radius / (M_PER_DEG_LAT * max(math.cos(math.radians(t_lat)), 0.1))
+        r_key = (round(t_lat - d_lat, 5), round(t_lng - d_lng, 5), round(t_lat + d_lat, 5), round(t_lng + d_lng, 5))
+        if self._is_cache_enabled():
+            cached = road_cache.get(r_key)
+            if cached is not None:
+                query_audit.record_cache_hit("road")
+                return cached
+        ways: List[dict] = []
+        for src in self.road_sources:
             try:
-                ways = source.get_ways(lat - dlat, lng - dlng, lat + dlat, lng + dlng)
-                if ways is not None:
+                ways = src.get_ways(*r_key) or []
+                if ways:
                     break
             except Exception as e:
-                logger.error(f"Road source {source.__class__.__name__} failed: {e}")
-                last_error = e
-        if ways is None and last_error is not None:
-            if isinstance(last_error, APIException):
-                raise last_error
-            raise APIException(
-                "Street map data service is temporarily unreachable. Please try again.",
-                status_code=504 if "timeout" in str(last_error).lower() or "504" in str(last_error) else 503,
-            )
-        roads = RoadNetwork(self.p)
-        roads.add_ways(ways or [])
-        return AreaSnapshot(roads, [], self.imagery, params=self.p, visited_image_ids=self.visited_image_ids)
+                logger.warning(f"Road source {src.__class__.__name__} failed: {e}")
+        if ways and self._is_cache_enabled():
+            road_cache.put(r_key, ways)
+        return ways
 
-    def _geocode(self, address: str):
-        coords = self.location.geocode(address)
-        if not coords:
-            raise APIException(f"Could not resolve location: {address}")
-        return coords["lat"], coords["lng"], coords.get("street")
+    def _snapshot_at(self, lat: float, lng: float) -> AreaSnapshot:
+        tile_deg = 0.004
+        t_key = (round(round(lat / tile_deg) * tile_deg, 5), round(round(lng / tile_deg) * tile_deg, 5))
+        if not self._is_cache_enabled() or len(road_cache) == 0:
+            self._tile_snapshots.clear()
+        if self._is_cache_enabled() and t_key in self._tile_snapshots:
+            return self._tile_snapshots[t_key]
+        rn = RoadNetwork(self.p)
+        rn.add_ways(self._fetch_ways(lat, lng, self.p.snapshot_radius_m))
+        snap = AreaSnapshot(
+            roads=rn, images=[], provider=self.imagery, params=self.p,
+            visited_image_ids=self.visited_image_ids, broken_image_ids=self.broken_image_ids,
+            active_sequences=self.active_sequences,
+        )
+        if self._is_cache_enabled():
+            if len(self._tile_snapshots) >= 16:
+                self._tile_snapshots.pop(next(iter(self._tile_snapshots)))
+            self._tile_snapshots[t_key] = snap
+        return snap
 
-    # ---------- view ----------
+    def _geocode(self, address: str) -> Tuple[float, float, Optional[str]]:
+        if self.location is None:
+            raise APIException("No geocoding service configured.")
+        geo = self.location.geocode(address)
+        if not geo or "lat" not in geo or "lng" not in geo:
+            raise APIException(f"Could not locate address: {address}")
+        return float(geo["lat"]), float(geo["lng"]), geo.get("street") or address.split(",")[0].strip()
+
+    @staticmethod
+    def _to_nav_link(out: OutLink) -> NavigationLink:
+        return NavigationLink(
+            canonicalNodeId=out.node_id,
+            imageId=out.image.imageId if out.image else None,
+            heading=out.bearing,
+            coordinates=LatLng(latitude=out.lat, longitude=out.lng),
+            distanceMeters=out.distance_m,
+            streetName=out.street_name,
+            status="ok" if out.image else "path_only",
+            captureTime=out.image.captureTime if out.image else None,
+            isPano=bool(out.image.isPano) if out.image else False,
+            arrivalHeading=out.arrival_bearing,
+        )
+
+    def _cache_solved_graph(self, snap: AreaSnapshot) -> None:
+        if not self._is_cache_enabled():
+            return
+        for node_id, node in snap.nodes.items():
+            out_links = snap.adj.get(node_id, [])
+            if node.image is None or not out_links:
+                continue
+            payload = {
+                "name": node.image.imageId,
+                "canonicalNodeId": node.node_id,
+                "panoramaMetadata": {
+                    "coordinates": {"latitude": node.lat, "longitude": node.lng},
+                    "captureTime": node.image.captureTime or "",
+                },
+                "links": [self._to_nav_link(out).model_dump() for out in out_links],
+                "status": "ok",
+                "lane": None,
+                "isPano": bool(node.image.isPano),
+            }
+            graph_cache.put(self._node_cache_key(node_id, None), payload)
+            graph_cache.put(self._node_cache_key(node_id, node.image.imageId), payload)
 
     def get_pano_view(
         self,
@@ -1113,173 +996,162 @@ class RouteProvider:
         pitch: float = 0,
         image_only: bool = False,
     ) -> ViewResponse:
-        # Fast path: the client has this node cached (links and all) and only
-        # needs the image re-cropped for a new heading. No area fetches.
         if image_only and image_id:
             image_data = self.imagery.get_image(image_id, heading, pitch)
             if not image_data:
                 raise APIException("Failed to retrieve image data.")
             return ViewResponse(
-                image=image_data["image"],
-                name=image_id,
-                canonicalNodeId=canonical_node_id,
+                image=image_data["image"], name=image_id, canonicalNodeId=canonical_node_id,
                 actualHeading=image_data["actualHeading"],
-                panoramaMetadata=PanoramaMetadata(
-                    coordinates=LatLng(latitude=lat or 0.0, longitude=lng or 0.0),
-                    captureTime="",
-                ),
-                links=[],
-                status="ok",
+                panoramaMetadata=PanoramaMetadata(coordinates=LatLng(latitude=lat or 0.0, longitude=lng or 0.0), captureTime=""),
+                links=[], status="ok",
             )
+
+        if canonical_node_id and not canonical_node_id.startswith("osm_") and self._is_cache_enabled():
+            cached_node = graph_cache.get(self._node_cache_key(canonical_node_id, image_id)) or graph_cache.get(self._node_cache_key(canonical_node_id, None))
+            if cached_node is not None and cached_node.get("name") and cached_node["name"] not in self.broken_image_ids:
+                cached_img_id = cached_node["name"]
+                query_audit.record_cache_hit("graph")
+                image_data = self.imagery.get_image(cached_img_id, heading, pitch)
+                if image_data:
+                    return ViewResponse(
+                        image=image_data["image"], name=cached_img_id, canonicalNodeId=cached_node["canonicalNodeId"],
+                        actualHeading=image_data["actualHeading"],
+                        panoramaMetadata=PanoramaMetadata(**cached_node["panoramaMetadata"]),
+                        links=[NavigationLink(**l) for l in cached_node.get("links", [])],
+                        status=cached_node.get("status", "ok"), isPano=bool(cached_node.get("isPano", True)),
+                    )
+                self.broken_image_ids.add(cached_img_id)
 
         street_hint = None
         seed: Optional[Seed] = None
         snap: Optional[AreaSnapshot] = None
         place: Optional[NodePlace] = None
 
+        if not canonical_node_id and not image_id:
+            self.active_sequences.clear()
+            self.visited_image_ids.clear()
+
         if canonical_node_id and lat is not None and lng is not None:
             snap = self._snapshot_at(lat, lng)
+            snap.solve(lat, lng)
             place = place_node(snap, canonical_node_id)
+
         if place is None and image_id:
             meta = self.imagery.get_metadata(image_id=image_id)
             if meta is None:
                 raise APIException(f"Image ID {image_id} not found.")
             lat, lng = meta.coordinates.latitude, meta.coordinates.longitude
+            snap = self._snapshot_at(lat, lng)
+            snap._ingest_metas([meta])
+            if meta.sequenceId:
+                snap.expand_sequence(meta.sequenceId, cache_only=False)
+            snap.solve(lat, lng)
+            place = place_node(snap, f"seq_{image_id}")
+
         if place is None and address:
-            lat, lng, street_hint = self._geocode(address)
+            if lat is None or lng is None:
+                lat, lng, street_hint = self._geocode(address)
+            else:
+                street_hint = address.split(",")[0].strip()
+
         if place is None:
             if lat is None or lng is None:
                 raise APIException("generatePanoramaView needs coordinates (or an address) to locate the node.")
-            if snap is None:
-                snap = self._snapshot_at(lat, lng)
+            snap = snap or self._snapshot_at(lat, lng)
             seed = pick_seed(snap, lat, lng, street_hint=street_hint)
             if seed is None:
                 raise APIException(f"No imagery available near {lat:.5f}, {lng:.5f}.")
             place = seed.place
 
-        if seed is not None:
-            ref = seed.image
-        else:
-            # If the client told us which image it's currently looking at, that
-            # is the exact continuity context (lane, capture era) for links.
-            hint = image_id if canonical_node_id else None
-            ref = reference_image(snap, place, image_id=hint)
-        if image_id:
-            self.visited_image_ids.add(image_id)
-            if snap:
-                snap.visited_image_ids.add(image_id)
-        if ref is not None:
-            self.visited_image_ids.add(ref.meta.imageId)
-            if snap:
-                snap.visited_image_ids.add(ref.meta.imageId)
+        ref = seed.image if seed is not None else reference_image(snap, place, image_id=image_id)
+        if ref is not None and ref.sequenceId and ref.sequenceId not in self.active_sequences:
+            self.active_sequences.append(ref.sequenceId)
+
+        links = [self._to_nav_link(out) for out in build_links(snap, place, ref)]
+
+        if seed is not None and links and ref is not None:
+            cam_h = float(ref.heading or 0.0)
+            if min(_ang_diff(heading, l.heading) for l in links) > 45.0 or (heading == 0.0 and cam_h != 0.0 and _ang_diff(0.0, cam_h) > 120.0):
+                heading = round(min(links, key=lambda l: _ang_diff(l.heading, cam_h)).heading, 1)
 
         if ref is None:
-            links = self._links_payload(snap, place, ref)
             return ViewResponse(
-                image=None,
-                name=None,
-                canonicalNodeId=place.node_id,
-                actualHeading=heading,
-                panoramaMetadata=PanoramaMetadata(
-                    coordinates=LatLng(latitude=place.lat, longitude=place.lng),
-                    captureTime="",
-                ),
-                links=links,
-                status="path_only",
+                image=None, name=None, canonicalNodeId=place.node_id, actualHeading=heading,
+                panoramaMetadata=PanoramaMetadata(coordinates=LatLng(latitude=place.lat, longitude=place.lng), captureTime=""),
+                links=links, status="path_only",
                 message="No imagery is available at this location; you can still navigate to nearby points.",
             )
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            image_future = executor.submit(self.imagery.get_image, ref.meta.imageId, heading, pitch)
-            links = self._links_payload(snap, place, ref)
-            image_data = image_future.result()
-
+        image_data = self.imagery.get_image(ref.imageId, heading, pitch)
         if not image_data:
+            self.broken_image_ids.add(ref.imageId)
             raise APIException("Failed to retrieve image data.")
 
-        view_lane = seed.lane if seed is not None else None
+        self.visited_image_ids.add(ref.imageId)
+        if snap is not None:
+            self._cache_solved_graph(snap)
+
         return ViewResponse(
-            image=image_data["image"],
-            name=ref.meta.imageId,
-            canonicalNodeId=place.node_id,
+            image=image_data["image"], name=ref.imageId, canonicalNodeId=place.node_id,
             actualHeading=image_data["actualHeading"],
-            panoramaMetadata=PanoramaMetadata(
-                coordinates=LatLng(latitude=place.lat, longitude=place.lng),
-                captureTime=ref.meta.captureTime or "",
-            ),
-            links=links,
-            status="ok",
-            lane=view_lane,
-            isPano=bool(ref.meta.isPano),
+            panoramaMetadata=PanoramaMetadata(coordinates=LatLng(latitude=place.lat, longitude=place.lng), captureTime=ref.captureTime or ""),
+            links=links, status="ok", isPano=bool(ref.isPano),
         )
-
-    def _links_payload(self, snap: AreaSnapshot, place: NodePlace, ref) -> List[NavigationLink]:
-        links: List[NavigationLink] = []
-        for out in build_links(snap, place, ref):
-            links.append(NavigationLink(
-                canonicalNodeId=out.node_id,
-                imageId=out.image.imageId if out.image else None,
-                heading=out.bearing,
-                coordinates=LatLng(latitude=out.lat, longitude=out.lng),
-                distanceMeters=out.distance_m,
-                streetName=out.street_name,
-                status="ok" if out.image else "path_only",
-                captureTime=out.image.captureTime if out.image else None,
-                isPano=bool(out.image.isPano) if out.image else False,
-                lane=out.lane,
-                arrivalHeading=out.arrival_bearing,
-            ))
-        return links
-
-    # ---------- debug ----------
 
     @log_call
     def get_local_graph(self, lat: float, lng: float, radius_m: float = 80.0) -> LocalGraphResponse:
-        """Debug radar: the road skeleton around a point (intersections + block
-        edges). The server holds no session, so the trail lives client-side."""
         snap = self._snapshot_at(lat, lng)
+        snap.solve(lat, lng, radius_m=radius_m)
+
         deg_lat = radius_m / 111320.0
         deg_lng = radius_m / (111320.0 * max(math.cos(math.radians(lat)), 0.1))
         min_lat, max_lat = lat - deg_lat, lat + deg_lat
         min_lng, max_lng = lng - deg_lng, lng + deg_lng
 
+        current_node_id: Optional[str] = None
+        if snap.nodes:
+            nearest = min(snap.nodes.values(), key=lambda n: calculate_distance(lat, lng, n.lat, n.lng))
+            if calculate_distance(lat, lng, nearest.lat, nearest.lng) <= 50.0:
+                current_node_id = nearest.node_id
+
         debug_nodes: List[DebugNode] = []
-        emitted = set()
-        for m in snap.roads.markers_in_bbox(min_lat, max_lat, min_lng, max_lng):
-            if m.kind == "join":
-                continue
-            node_id = f"osm_{m.osm_node_id}"
-            emitted.add(node_id)
-            debug_nodes.append(DebugNode(
-                canonicalNodeId=node_id,
-                coordinates=LatLng(latitude=m.lat, longitude=m.lng),
-                kind="intersection",
-                status="unknown",
-                imageId=None,
-                streetNames=list(m.street_names),
-            ))
+        in_box_node_ids: Set[str] = set()
+        for node_id, node in snap.nodes.items():
+            if min_lat <= node.lat <= max_lat and min_lng <= node.lng <= max_lng:
+                in_box_node_ids.add(node_id)
+                debug_nodes.append(
+                    DebugNode(
+                        canonicalNodeId=node.node_id,
+                        coordinates=LatLng(latitude=node.lat, longitude=node.lng),
+                        kind=node.kind,
+                        status="ok" if node.image is not None else "path_only",
+                        imageId=node.image.imageId if node.image else None,
+                        streetNames=list(node.street_names),
+                        sequenceId=node.image.sequenceId if node.image else None,
+                    )
+                )
 
         debug_edges: List[DebugEdge] = []
-        seen_pairs = set()
-        for m in snap.roads.markers_in_bbox(min_lat, max_lat, min_lng, max_lng):
-            for leg in m.legs:
-                res = snap.roads.walk(leg.way_id, leg.along, leg.direction, 300.0)
-                if res.end_marker is None:
-                    continue
-                a_id, b_id = f"osm_{m.osm_node_id}", f"osm_{res.end_marker.osm_node_id}"
-                pair = tuple(sorted((a_id, b_id)))
-                if pair in seen_pairs or a_id not in emitted or b_id not in emitted:
-                    continue
-                seen_pairs.add(pair)
-                debug_edges.append(DebugEdge(
-                    fromId=a_id, toId=b_id, bearing=leg.bearing,
-                    lengthMeters=res.total_dist, streetName=leg.street_name,
-                ))
+        for pair_key, info in snap.chosen_passes.items():
+            chain: List[NodePlace] = info.get("chain") or []
+            if len(chain) >= 2 and any(n.node_id in in_box_node_ids for n in chain):
+                u, v = chain[0], chain[-1]
+                debug_edges.append(
+                    DebugEdge(
+                        fromId=u.node_id, toId=v.node_id,
+                        bearing=_compass_bearing(u.lat, u.lng, v.lat, v.lng),
+                        lengthMeters=info["path_len"],
+                        streetName=snap.adjacent_pairs.get(pair_key, ""),
+                        polyline=[LatLng(latitude=n.lat, longitude=n.lng) for n in chain],
+                    )
+                )
 
         return LocalGraphResponse(
             center=LatLng(latitude=lat, longitude=lng),
             radiusMeters=radius_m,
-            currentNodeId=None,
+            currentNodeId=current_node_id,
             nodes=debug_nodes,
             edges=debug_edges,
+            queryAudit=query_audit.snapshot(),
         )

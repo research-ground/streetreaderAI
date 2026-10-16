@@ -18,7 +18,16 @@ import hashlib
 import os
 from flask import Flask, request, jsonify, send_from_directory
 
-from server.core.cache import description_cache, clear_all_caches
+from server.core.cache import (
+    clear_all_caches,
+    description_cache,
+    graph_cache,
+    image_cache,
+    metadata_cache,
+    query_audit,
+    road_cache,
+    window_cache,
+)
 from server.core.config import config
 from server.core.logger import logger, log_call
 from server.core.exceptions import APIException
@@ -42,7 +51,13 @@ else:
     location_service = OpenStreetMapLocationService()
 
 # Imagery
-if config.IMAGERY_PROVIDER == "mapillary" and config.MAPILLARY_CLIENT_TOKEN:
+if config.IMAGERY_PROVIDER == "panoramax":
+    from server.services.imagery.panoramax_image_service import PanoramaxProvider
+    imagery_provider = PanoramaxProvider(
+        default_fov=config.DEFAULT_FOV,
+        base_url=config.PANORAMAX_BASE_URL,
+    )
+elif config.IMAGERY_PROVIDER == "mapillary" and config.MAPILLARY_CLIENT_TOKEN:
     from server.services.imagery.mapillary_image_service import MapillaryProvider
     imagery_provider = MapillaryProvider(
         client_token=config.MAPILLARY_CLIENT_TOKEN,
@@ -51,7 +66,7 @@ if config.IMAGERY_PROVIDER == "mapillary" and config.MAPILLARY_CLIENT_TOKEN:
 else:
     from server.services.imagery.stub_image_service import StubImageService
     imagery_provider = StubImageService()
-    logger.warning("No Mapillary token configured — imagery disabled, navigation will find no views")
+    logger.warning("No imagery provider configured — imagery disabled, navigation will find no views")
 
 # Routing engine
 route_provider = RouteProvider(
@@ -268,8 +283,30 @@ def get_help():
 @app.route('/v1/streetreader:config', methods=['GET'])
 @app.route('/api/config', methods=['GET'])
 def get_config():
+    start_addr = (
+        config.PANORAMAX_STARTING_ADDRESS
+        if config.IMAGERY_PROVIDER == "panoramax"
+        else config.STARTING_ADDRESS
+    )
     return jsonify({
-        "startingAddress": config.STARTING_ADDRESS
+        "startingAddress": start_addr,
+        "imageryProvider": config.IMAGERY_PROVIDER,
+        "demoMode": config.DEMO_MODE,
+    })
+
+
+@app.route('/v1/streetreader:cacheStats', methods=['GET'])
+def get_cache_stats():
+    return jsonify({
+        "caches": {
+            "image": len(image_cache),
+            "window": len(window_cache),
+            "road": len(road_cache),
+            "metadata": len(metadata_cache),
+            "graph": len(graph_cache),
+            "description": len(description_cache),
+        },
+        "queryAudit": query_audit.snapshot(),
     })
 
 

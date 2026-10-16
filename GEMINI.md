@@ -69,3 +69,13 @@ Welcome! As an AI development assistant (Gemini, Antigravity, Jetski, etc.) work
 Always run the appropriate local test suites when making changes to verify correctness before pushing or submitting a pull request:
 * **Pre-commit gate**: Run `make test` (or `make check`) before every commit. It runs the offline server unit tests and client tests.
 * **Full Integration & Browser Suite**: Run `make test-all` to execute the master end-to-end test harness (requires the Flask server to be running on `localhost:5001` — start it with `make start`).
+
+---
+
+## 6. Routing & Algorithmic Design Rules
+
+### 🧭 Follow Explicit User Direction Over Hidden Heuristics
+* **Strict Adherence**: When the developer specifies the factors or algorithm to use, implement **only** those factors. Never silently introduce or heavily weight unrequested heuristics (such as distance to the OSM road centerline) that override the developer's instructions.
+* **Intersections + Direct Sequence Slices Only**:
+  * OSM road geometry is used to identify **intersections** (merging multi-node junctions and traffic circles) and **block adjacency** between intersections—**not** as a physical centerline to project images onto or score perpendicular distance against.
+  * Street blocks between intersections must be connected using **contiguous temporal slices of a single 360° camera sequence** (`captureTime` order) that passes directly from one intersection to the next, rather than synthetic centerline offset waypoints (`way_..._off_...`) or per-step centerline distance scoring.

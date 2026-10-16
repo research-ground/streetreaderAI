@@ -150,8 +150,17 @@ def test_config_endpoints(client):
     res = client.get("/v1/streetreader:config")
     assert res.status_code == 200
     json_data = res.get_json()
-    assert json_data.get("startingAddress") == "411 15th Ave E, Seattle, WA"
+    assert json_data.get("startingAddress") == "601 N 34th St, Seattle, WA"
 
     res_api = client.get("/api/config")
     assert res_api.status_code == 200
-    assert res_api.get_json().get("startingAddress") == "411 15th Ave E, Seattle, WA"
+    assert res_api.get_json().get("startingAddress") == "601 N 34th St, Seattle, WA"
+
+
+def test_cache_stats_endpoint(client):
+    res = client.get("/v1/streetreader:cacheStats")
+    assert res.status_code == 200
+    data = res.get_json()
+    assert "caches" in data
+    assert "queryAudit" in data
+    assert "duplicate_count" in data["queryAudit"]

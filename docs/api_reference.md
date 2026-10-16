@@ -252,11 +252,39 @@ Returns the road network graph (intersections and way segments) within a radius 
       "toId": "way_6457203_off_200",
       "bearing": 0.5,
       "lengthMeters": 15.2,
-      "streetName": "15th Avenue East"
+      "streetName": "15th Avenue East",
+      "polyline": [
+        { "latitude": 47.62235, "longitude": -122.31283 },
+        { "latitude": 47.62249, "longitude": -122.31283 }
+      ]
     }
-  ]
+  ],
+  "candidates": [
+    {
+      "imageId": "3888112701332191",
+      "coordinates": { "latitude": 47.62235, "longitude": -122.31283 },
+      "heading": 180.0,
+      "sequenceId": "seq_123",
+      "lane": "right",
+      "selected": true,
+      "perpDistanceMeters": -2.4
+    }
+  ],
+  "queryAudit": {
+    "external_calls": {},
+    "total_external_calls": 0,
+    "cache_hits": { "overpass": 1, "window": 1 },
+    "total_cache_hits": 2,
+    "duplicate_queries": [],
+    "duplicate_count": 0
+  }
 }
 ```
+
+---
+
+### `GET /v1/streetreader:cacheStats`
+Returns current server cache entry counts across all tiers (`image`, `window`, `road`, `metadata`, `graph`, `description`) and live query audit telemetry (`external_calls`, `cache_hits`, `duplicate_queries`).
 
 ---
 

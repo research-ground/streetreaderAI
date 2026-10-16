@@ -220,3 +220,23 @@ class TestDiskCache:
         recovered = road_adapter2.get((47.605, -122.305, 47.625, -122.285))
         assert recovered is not None
         assert recovered[0]["id"] == 555
+
+    def test_singleflight_coalesces_concurrent_requests(self):
+        import concurrent.futures
+        import time
+        from server.core.cache import singleflight
+
+        call_count = 0
+
+        def slow_fn():
+            nonlocal call_count
+            call_count += 1
+            time.sleep(0.05)
+            return {"ok": True, "calls": call_count}
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+            futures = [pool.submit(singleflight, "sf_test_key", slow_fn) for _ in range(4)]
+            results = [f.result() for f in futures]
+
+        assert call_count == 1
+        assert all(r == {"ok": True, "calls": 1} for r in results)

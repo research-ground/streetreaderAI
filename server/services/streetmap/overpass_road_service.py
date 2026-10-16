@@ -31,7 +31,7 @@ from typing import List, Optional, Tuple
 
 import requests
 
-from server.core.cache import road_cache
+from server.core.cache import road_cache, query_audit
 from server.core.config import config
 from server.core.logger import logger
 from server.services.streetmap.base import RoadDataSource
@@ -49,10 +49,12 @@ NAVIGABLE_HIGHWAYS = (
     "residential|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|"
     "unclassified|living_street|pedestrian"
 )
+NAVIGABLE_HIGHWAY_SET = frozenset(NAVIGABLE_HIGHWAYS.split("|"))
 EXCLUDED_HIGHWAYS = (
     "motorway|motorway_link|trunk|trunk_link|construction|proposed|raceway|bus_guideway|"
     "footway|path|cycleway|steps|corridor|bridleway|via_ferrata"
 )
+OSM_MAP_API_URL = "https://api.openstreetmap.org/api/0.6/map.json"
 
 # One Overpass request in flight at a time, server-wide: the free tier
 # rate-limits per client, and concurrent calls are how we earned 429s.
@@ -169,10 +171,12 @@ class OverpassRoadService(RoadDataSource):
         cache_key = (round(min_lat, 5), round(min_lng, 5), round(max_lat, 5), round(max_lng, 5))
         cached = road_cache.get(cache_key)
         if cached is not None:
+            query_audit.record_cache_hit("overpass")
             logger.info(f"Overpass: {len(cached)} ways from cache (0.0s)")
             return cached
 
         bbox_str = f"{min_lat},{min_lng},{max_lat},{max_lng}"
+        query_audit.record_external("overpass", f"{cache_key[0]},{cache_key[1]},{cache_key[2]},{cache_key[3]}")
         query = (
             f"[out:json][timeout:{int(self.timeout_s)}];"
             f"way({bbox_str})[\"highway\"~\"^({NAVIGABLE_HIGHWAYS})$\"];"
@@ -210,3 +214,73 @@ class OverpassRoadService(RoadDataSource):
                     continue
                 logger.error(f"Overpass request failed at {endpoint}: {e}")
                 raise
+
+
+class OsmMapApiRoadService(RoadDataSource):
+    """Fast small-bbox road source backed by the official OpenStreetMap v0.6
+    `/api/0.6/map.json` endpoint (Fastly CDN).
+
+    Unlike public Overpass QL mirrors—which frequently rate-limit or time out
+    evaluating regex queries—the OSM v0.6 map endpoint is purpose-built for
+    small bounding boxes (~300m x 300m) and returns all ways and their full
+    node geometries in ~1-2s. Returns None on any error so RouteProvider
+    transparently falls back to OverpassRoadService.
+    """
+
+    def __init__(self, endpoint: str = OSM_MAP_API_URL, http_timeout_s: float = 10.0):
+        self.endpoint = endpoint
+        self.http_timeout_s = http_timeout_s
+
+    def get_ways(self, min_lat: float, min_lng: float, max_lat: float, max_lng: float
+                 ) -> Optional[List[dict]]:
+        cache_key = (round(min_lat, 5), round(min_lng, 5), round(max_lat, 5), round(max_lng, 5))
+        cached = road_cache.get(cache_key)
+        if cached is not None:
+            query_audit.record_cache_hit("overpass")
+            logger.info(f"OsmMapApi: {len(cached)} ways from cache (0.0s)")
+            return cached
+
+        # OSM v0.6 map API uses bbox = min_lng,min_lat,max_lng,max_lat (left,bottom,right,top)
+        bbox_param = f"{min_lng},{min_lat},{max_lng},{max_lat}"
+        query_audit.record_external("overpass", f"osm06:{cache_key[0]},{cache_key[1]},{cache_key[2]},{cache_key[3]}")
+        try:
+            t0 = time.time()
+            resp = requests.get(
+                self.endpoint,
+                params={"bbox": bbox_param},
+                headers={
+                    "User-Agent": "StreetReaderAI/1.0",
+                    "Accept": "application/json",
+                },
+                timeout=self.http_timeout_s,
+            )
+            resp.raise_for_status()
+            elements = (resp.json() or {}).get("elements") or []
+            nodes = {
+                el["id"]: (el["lat"], el["lon"])
+                for el in elements
+                if el.get("type") == "node" and "id" in el and "lat" in el and "lon" in el
+            }
+            ways: List[dict] = []
+            for el in elements:
+                if el.get("type") != "way":
+                    continue
+                tags = el.get("tags") or {}
+                if tags.get("highway") not in NAVIGABLE_HIGHWAY_SET:
+                    continue
+                node_ids = [nid for nid in (el.get("nodes") or []) if nid in nodes]
+                if len(node_ids) < 2:
+                    continue
+                ways.append({
+                    "type": "way",
+                    "id": el["id"],
+                    "nodes": node_ids,
+                    "tags": tags,
+                    "geometry": [{"lat": nodes[nid][0], "lon": nodes[nid][1]} for nid in node_ids],
+                })
+            logger.info(f"OsmMapApi: {len(ways)} navigable ways in {time.time() - t0:.2f}s")
+            road_cache.put(cache_key, ways)
+            return ways
+        except Exception as e:
+            logger.warning(f"OsmMapApi failed ({e}); falling back to OverpassRoadService.")
+            return None

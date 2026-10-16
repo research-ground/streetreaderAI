@@ -17,7 +17,15 @@
 import pytest
 from unittest.mock import MagicMock, patch
 from server.services.imagery.mapillary_image_service import MapillaryProvider
+from server.core.cache import clear_all_caches, metadata_cache, window_cache
 from server.core.exceptions import APIException
+
+
+@pytest.fixture(autouse=True)
+def _clean_caches():
+    clear_all_caches()
+    yield
+    clear_all_caches()
 
 
 def test_mapillary_bbox_metadata():
@@ -39,6 +47,40 @@ def test_mapillary_bbox_metadata():
         assert metas[0].imageId == "mapillary_123"
         assert metas[0].isPano is True
         assert metas[0].coordinates.latitude == 47.6223
+        # Bulk bbox query must omit thumb_2048_url and do 0 per-frame metadata_cache writes
+        fields_param = mock_get.call_args[1]["params"]["fields"]
+        assert "thumb_2048_url" not in fields_param
+        assert len(metadata_cache) == 0
+
+
+def test_mapillary_get_sequence_single_db_write_and_no_thumbnails():
+    with patch("server.services.imagery.mapillary_image_service.requests.get") as mock_get:
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "data": [
+                {
+                    "id": f"frame_{i}",
+                    "geometry": {"coordinates": [-122.3126, 47.6200 + i * 0.0001]},
+                    "is_pano": True,
+                    "captured_at": 1750000000000 + i * 1000,
+                    "sequence": "seq_bulk_1",
+                }
+                for i in range(50)
+            ]
+        }
+        mock_get.return_value = mock_resp
+
+        provider = MapillaryProvider(client_token="test-token")
+        frames = provider.get_sequence("seq_bulk_1")
+
+        assert len(frames) == 50
+        assert [f.imageId for f in frames[:3]] == ["frame_0", "frame_1", "frame_2"]
+        fields_param = mock_get.call_args[1]["params"]["fields"]
+        assert "thumb_2048_url" not in fields_param
+        # Entire sequence is stored as 1 row in window_cache and 0 rows in metadata_cache
+        assert len(metadata_cache) == 0
+        assert window_cache.get(("mapillary", "seq", "seq_bulk_1")) is not None
 
 
 def test_mapillary_bbox_timeout_raises_api_exception():

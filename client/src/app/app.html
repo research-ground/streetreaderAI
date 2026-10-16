@@ -23,10 +23,6 @@
       <mat-icon>help</mat-icon>
       Help
     </button>
-    <button *ngIf="showDebugMenu()" mat-button aria-label="Debug" (click)="uiService.toggleVisibility('debug')" [color]="uiService.state()['debug'].visible ? 'accent' : ''">
-      <mat-icon>bug_report</mat-icon>
-      Debug
-    </button>
     <button mat-button aria-label="Settings" (click)="openSettings()">
       <mat-icon>settings</mat-icon>
       Settings
@@ -43,23 +39,6 @@
        alt="Street view panorama">
   <div class="panorama-placeholder" *ngIf="!currentImage()">Loading...</div>
 
-
-
-  <!-- Debug Sidebar -->
-  <div *ngIf="uiService.state()['debug'].visible" class="debug-sidebar mat-elevation-z8" style="position: absolute; top: 0; right: 0; bottom: 0; width: 350px; background: white; z-index: 100; overflow-y: auto;">
-    <div style="padding: 16px; background: #f5f5f5; border-bottom: 1px solid #ddd; display: flex; align-items: center;">
-      <mat-icon style="margin-right: 8px;">bug_report</mat-icon>
-      <h2 style="margin: 0; font-size: 1.2rem; font-weight: 500;">Debug Tools</h2>
-      <span style="flex: 1 1 auto;"></span>
-      <button mat-icon-button (click)="uiService.toggleVisibility('debug')" aria-label="Close debug panel">
-        <mat-icon>close</mat-icon>
-      </button>
-    </div>
-    <div style="padding: 16px;">
-      <app-debug-panel></app-debug-panel>
-    </div>
-  </div>
-
   <!-- Screen Curtain -->
   <div class="screen-curtain" *ngIf="stateService.screenCurtain()" aria-hidden="true">
     <div class="curtain-message">
@@ -71,6 +50,31 @@
 
   <app-palette [components]="leftComponents()" side="left"></app-palette>
   <app-palette [components]="rightComponents()" side="right"></app-palette>
+  <app-radar-view></app-radar-view>
+
+  @if (demoModeService.enabled()) {
+    <div class="demo-movement-keys mat-elevation-z3" role="region" aria-label="Movement keyboard controls">
+      <div class="demo-keys-title">Movement Keys</div>
+      <div class="demo-keys-grid">
+        <div class="demo-key-item">
+          <span class="demo-key-badge" aria-hidden="true">&uarr;</span>
+          <span class="demo-key-desc">Move forward</span>
+        </div>
+        <div class="demo-key-item">
+          <span class="demo-key-badge" aria-hidden="true">&darr;</span>
+          <span class="demo-key-desc">Turn around 180&deg;</span>
+        </div>
+        <div class="demo-key-item">
+          <span class="demo-key-badge" aria-hidden="true">&larr;</span>
+          <span class="demo-key-desc">Turn left 45&deg;</span>
+        </div>
+        <div class="demo-key-item">
+          <span class="demo-key-badge" aria-hidden="true">&rarr;</span>
+          <span class="demo-key-desc">Turn right 45&deg;</span>
+        </div>
+      </div>
+    </div>
+  }
 </main>
 
 <footer class="status-bar" role="contentinfo">

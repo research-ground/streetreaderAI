@@ -21,6 +21,8 @@ import { tap } from 'rxjs/operators';
 
 export interface AppRuntimeConfig {
   startingAddress: string;
+  imageryProvider?: string;
+  demoMode?: boolean;
 }
 
 export interface AutocompleteItem {
@@ -116,6 +118,7 @@ export interface DebugNode {
   status: 'ok' | 'path_only' | 'unknown';
   imageId?: string | null;
   streetNames: string[];
+  sequenceId?: string | null;
 }
 
 export interface DebugEdge {
@@ -124,6 +127,16 @@ export interface DebugEdge {
   bearing: number;
   lengthMeters: number;
   streetName: string;
+  polyline?: LatLng[];
+}
+
+export interface QueryAuditSummary {
+  external_calls: Record<string, number>;
+  total_external_calls: number;
+  cache_hits: Record<string, number>;
+  total_cache_hits: number;
+  duplicate_queries: string[];
+  duplicate_count: number;
 }
 
 export interface LocalGraphResponse {
@@ -133,6 +146,7 @@ export interface LocalGraphResponse {
   currentNodeId?: string | null;
   nodes: DebugNode[];
   edges: DebugEdge[];
+  queryAudit?: QueryAuditSummary | null;
 }
 
 @Injectable({

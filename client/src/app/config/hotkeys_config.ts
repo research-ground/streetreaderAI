@@ -60,11 +60,11 @@ export const HOTKEYS: Record<string, HotkeyConfig> = {
     command: { type: 'MOVE_FORWARD' },
     section: 'Navigation'
   },
-  MOVE_BACKWARD: {
+  TURN_AROUND: {
     key: 'ArrowDown',
     displayKey: '↓',
-    description: 'Move backward',
-    command: { type: 'MOVE_BACKWARD' },
+    description: 'Turn around by 180°',
+    command: { type: 'TURN_AROUND' },
     section: 'Navigation'
   },
   ROTATE_LEFT: {

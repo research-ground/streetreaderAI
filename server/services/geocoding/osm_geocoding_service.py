@@ -16,6 +16,7 @@
 
 import requests
 from typing import List, Optional
+from server.core.cache import metadata_cache, query_audit
 from server.core.config import config
 from server.services.geocoding.base import LocationService, AutocompletePrediction
 from server.core.logger import logger
@@ -41,6 +42,11 @@ class OpenStreetMapLocationService(LocationService):
         resp.raise_for_status()
 
     def geocode(self, address: str) -> Optional[dict]:
+        cache_key = f"nominatim:fwd:{self.nominatim_base_url}:{address.strip().lower()}"
+        cached = metadata_cache.get(cache_key)
+        if cached is not None:
+            query_audit.record_cache_hit("nominatim")
+            return cached
         endpoint = f"{self.nominatim_base_url}/search"
         params = {
             "q": address,
@@ -49,17 +55,20 @@ class OpenStreetMapLocationService(LocationService):
             "addressdetails": 1,  # gives us the road name, so snapping can match by street
         }
         try:
+            query_audit.record_external("nominatim_fwd", address.strip().lower())
             resp = requests.get(endpoint, params=params, headers=self.headers, timeout=config.NOMINATIM_TIMEOUT_S)
             self._check_rate_limit(resp)
             data = resp.json()
             if data and len(data) > 0:
                 details = data[0].get('address') or {}
-                return {
+                res = {
                     'lat': float(data[0]['lat']),
                     'lng': float(data[0]['lon']),
                     'address': data[0].get('display_name', address),
                     'street': details.get('road') or details.get('pedestrian'),
                 }
+                metadata_cache.put(cache_key, res)
+                return res
         except APIException:
             raise
         except Exception as e:
@@ -67,6 +76,11 @@ class OpenStreetMapLocationService(LocationService):
         return None
 
     def reverse_geocode(self, lat: float, lng: float, result_type: Optional[str] = None, return_all: bool = False) -> Optional[dict | List[dict]]:
+        cache_key = f"nominatim:rev:{self.nominatim_base_url}:{round(lat, 5)}:{round(lng, 5)}"
+        cached = metadata_cache.get(cache_key)
+        if cached is not None:
+            query_audit.record_cache_hit("nominatim")
+            return [cached] if return_all else cached
         endpoint = f"{self.nominatim_base_url}/reverse"
         params = {
             "lat": lat,
@@ -74,11 +88,13 @@ class OpenStreetMapLocationService(LocationService):
             "format": "json"
         }
         try:
+            query_audit.record_external("nominatim_rev", f"{round(lat, 5)},{round(lng, 5)}")
             resp = requests.get(endpoint, params=params, headers=self.headers, timeout=config.NOMINATIM_TIMEOUT_S)
             self._check_rate_limit(resp)
             data = resp.json()
             if 'display_name' in data:
                 res_dict = {'formatted_address': data['display_name']}
+                metadata_cache.put(cache_key, res_dict)
                 if return_all:
                     return [res_dict]
                 return res_dict

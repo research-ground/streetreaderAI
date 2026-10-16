@@ -87,8 +87,6 @@ class DiskCache:
 
     def get_spatial_roads(self, min_lat: float, min_lng: float, max_lat: float, max_lng: float) -> Optional[List[dict]]:
         with self._lock:
-            center_lat = (min_lat + max_lat) / 2.0
-            center_lng = (min_lng + max_lng) / 2.0
             cursor = self._conn.cursor()
 
             # 1. Exact match check
@@ -101,14 +99,25 @@ class DiskCache:
                 self._conn.commit()
                 return json.loads(row[0].decode("utf-8"))
 
-            # 2. Spatial containment: find all cached road bboxes that contain (center_lat, center_lng)
+            # 2. Spatial containment: only hit cache if (center_lat, center_lng) sits
+            # within the interior (inner 60%) of the cached road bbox, ensuring at least
+            # 20% of the tile span remains ahead in every direction so cross streets are
+            # never truncated near a tile boundary.
+            center_lat = (min_lat + max_lat) / 2.0
+            center_lng = (min_lng + max_lng) / 2.0
+            req_dlat = (max_lat - min_lat) * 0.85
+            req_dlng = (max_lng - min_lng) * 0.85
             cursor.execute("""
                 SELECT key, data FROM cache_entries
                 WHERE tier = 'road'
-                  AND min_lat <= ? AND ? <= max_lat
-                  AND min_lng <= ? AND ? <= max_lng
+                  AND (max_lat - min_lat) >= ?
+                  AND (max_lng - min_lng) >= ?
+                  AND (min_lat + 0.25 * (max_lat - min_lat)) <= ?
+                  AND ? <= (max_lat - 0.25 * (max_lat - min_lat))
+                  AND (min_lng + 0.25 * (max_lng - min_lng)) <= ?
+                  AND ? <= (max_lng - 0.25 * (max_lng - min_lng))
                 ORDER BY last_accessed DESC
-            """, (center_lat, center_lat, center_lng, center_lng))
+            """, (req_dlat, req_dlng, center_lat, center_lat, center_lng, center_lng))
             rows = cursor.fetchall()
             if not rows:
                 return None
@@ -196,6 +205,8 @@ class DiskCache:
 # --- Tier Adapters ---
 
 class ImageCacheAdapter:
+    _PICKLE_PREFIX = b"__PKL__:"
+
     def __init__(self, backend: DiskCache):
         self.backend = backend
 
@@ -203,12 +214,23 @@ class ImageCacheAdapter:
     def max_bytes(self) -> int:
         return self.backend.max_bytes
 
-    def get(self, key: str) -> Optional[bytes]:
-        return self.backend.get("image", str(key))
+    def get(self, key: str) -> Optional[Any]:
+        raw = self.backend.get("image", str(key))
+        if raw is None:
+            return None
+        if isinstance(raw, bytes) and raw.startswith(self._PICKLE_PREFIX):
+            import pickle
+            return pickle.loads(raw[len(self._PICKLE_PREFIX):])
+        return raw
 
-    def put(self, key: str, val: bytes, size_bytes: Optional[int] = None) -> None:
-        sb = size_bytes if size_bytes is not None else len(val)
-        self.backend.put("image", str(key), val, sb)
+    def put(self, key: str, val: Any, size_bytes: Optional[int] = None) -> None:
+        if not isinstance(val, bytes):
+            import pickle
+            blob = self._PICKLE_PREFIX + pickle.dumps(val)
+        else:
+            blob = val
+        sb = size_bytes if size_bytes is not None else len(blob)
+        self.backend.put("image", str(key), blob, sb)
 
     def clear(self) -> None:
         self.backend.clear("image")
@@ -308,6 +330,103 @@ class DescriptionCacheAdapter:
 
     def __len__(self) -> int:
         return self.backend.count("description")
+
+
+class MetadataCacheAdapter:
+    """Caches LocationMetadata dicts by imageId so get_metadata/get_image never
+    re-query metadata already returned by a bbox search."""
+
+    def __init__(self, backend: DiskCache):
+        self.backend = backend
+
+    @property
+    def max_items(self) -> int:
+        return 50000
+
+    def get(self, key: str) -> Optional[dict]:
+        raw = self.backend.get("metadata", f"meta:{key}")
+        if raw is None:
+            return None
+        return json.loads(raw.decode("utf-8"))
+
+    def put(self, key: str, val: dict) -> None:
+        payload = json.dumps(val).encode("utf-8")
+        self.backend.put("metadata", f"meta:{key}", payload, len(payload))
+
+    def clear(self) -> None:
+        self.backend.clear("metadata")
+
+    def __len__(self) -> int:
+        return self.backend.count("metadata")
+
+
+class GraphCacheAdapter:
+    """Caches canonical block and node graph solutions."""
+
+    def __init__(self, backend: DiskCache):
+        self.backend = backend
+
+    @property
+    def max_items(self) -> int:
+        return 10000
+
+    def get(self, key: str) -> Optional[Any]:
+        raw = self.backend.get("graph", f"graph:{key}")
+        if raw is None:
+            return None
+        return json.loads(raw.decode("utf-8"))
+
+    def put(self, key: str, val: Any) -> None:
+        payload = json.dumps(val).encode("utf-8")
+        self.backend.put("graph", f"graph:{key}", payload, len(payload))
+
+    def clear(self) -> None:
+        self.backend.clear("graph")
+
+    def __len__(self) -> int:
+        return self.backend.count("graph")
+
+
+class QueryAuditor:
+    """Tracks outbound network queries and cache hits to detect redundant or
+    excessive external API requests."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self.reset()
+
+    def reset(self) -> None:
+        with self._lock:
+            self.external_calls: OrderedDict[str, int] = OrderedDict()
+            self.cache_hits: OrderedDict[str, int] = OrderedDict()
+            self.seen_keys: dict[str, set[str]] = {}
+            self.duplicate_queries: list[Tuple[str, str]] = []
+
+    def record_external(self, service: str, key: str = "") -> None:
+        with self._lock:
+            self.external_calls[service] = self.external_calls.get(service, 0) + 1
+            if key:
+                seen = self.seen_keys.setdefault(service, set())
+                if key in seen:
+                    self.duplicate_queries.append((service, key))
+                    logger.warning(f"[QUERY_AUDIT] Duplicate external query to {service}: {key}")
+                else:
+                    seen.add(key)
+
+    def record_cache_hit(self, tier: str) -> None:
+        with self._lock:
+            self.cache_hits[tier] = self.cache_hits.get(tier, 0) + 1
+
+    def snapshot(self) -> dict:
+        with self._lock:
+            return {
+                "external_calls": dict(self.external_calls),
+                "total_external_calls": sum(self.external_calls.values()),
+                "cache_hits": dict(self.cache_hits),
+                "total_cache_hits": sum(self.cache_hits.values()),
+                "duplicate_queries": list(self.duplicate_queries),
+                "duplicate_count": len(self.duplicate_queries),
+            }
 
 
 
@@ -433,6 +552,50 @@ image_cache = ImageCacheAdapter(_global_disk_cache)
 window_cache = WindowCacheAdapter(_global_disk_cache)
 road_cache = RoadCacheAdapter(_global_disk_cache)
 description_cache = DescriptionCacheAdapter(_global_disk_cache)
+metadata_cache = MetadataCacheAdapter(_global_disk_cache)
+graph_cache = GraphCacheAdapter(_global_disk_cache)
+query_audit = QueryAuditor()
+
+
+class _InFlightSlot:
+    def __init__(self):
+        self.event = threading.Event()
+        self.result: Any = None
+        self.error: Optional[BaseException] = None
+
+
+_inflight_lock = threading.Lock()
+_inflight_map: Dict[str, _InFlightSlot] = {}
+
+
+def singleflight(key: str, fn):
+    """Coalesce concurrent calls for the same key into a single execution of `fn`."""
+    with _inflight_lock:
+        slot = _inflight_map.get(key)
+        if slot is None:
+            slot = _InFlightSlot()
+            _inflight_map[key] = slot
+            is_leader = True
+        else:
+            is_leader = False
+
+    if not is_leader:
+        slot.event.wait(timeout=30.0)
+        if slot.error is not None:
+            raise slot.error
+        return slot.result
+
+    try:
+        slot.result = fn()
+        return slot.result
+    except BaseException as exc:
+        slot.error = exc
+        raise
+    finally:
+        with _inflight_lock:
+            _inflight_map.pop(key, None)
+        slot.event.set()
+
 
 logger.info(
     f'Initialized disk-backed SQLite cache at {_global_disk_cache.db_path} '
@@ -443,5 +606,6 @@ logger.info(
 def clear_all_caches() -> None:
     """Clears all disk-backed in-memory/SQLite caches across all tiers."""
     _global_disk_cache.clear()
+    query_audit.reset()
     logger.info("Cleared all server caches on disk and in memory.")
 
