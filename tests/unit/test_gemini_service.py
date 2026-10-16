@@ -99,3 +99,22 @@ def test_gemini_ask_question_detect_actions_false_overrides_to_none():
 
         assert result.answer == "There is a tall red brick building."
         assert result.navigationalAction == "NONE"
+
+
+def test_gemini_api_key_override():
+    with patch("server.services.ai.gemini_ai_service.genai.Client") as mock_client_cls:
+        default_client = MagicMock()
+        override_client = MagicMock()
+        mock_client_cls.side_effect = [default_client, override_client]
+
+        mock_resp = MagicMock()
+        mock_resp.parsed = DescribeResponse(description="Overridden key description.")
+        override_client.models.generate_content.return_value = mock_resp
+
+        service = GeminiService(api_key="default-key", model_id="gemini-3.8-flash")
+        result = service.generate_description(_make_dummy_image_b64(), api_key="custom-url-key")
+
+        assert result == "Overridden key description."
+        mock_client_cls.assert_any_call(api_key="custom-url-key")
+        override_client.models.generate_content.assert_called_once()
+        default_client.models.generate_content.assert_not_called()

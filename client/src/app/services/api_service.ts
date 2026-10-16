@@ -15,7 +15,7 @@
  */
 
 import { Injectable, inject } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
 
@@ -213,14 +213,55 @@ export class ApiService {
   }
 
   describeImage(imageBytes: string): Observable<DescribeImageResponse> {
-    return this.http.post<DescribeImageResponse>(`${this.apiUrl}:describeImage`, { image: imageBytes });
+    return this.http.post<DescribeImageResponse>(
+      `${this.apiUrl}:describeImage`,
+      { image: imageBytes },
+      this.getAiRequestOptions()
+    );
   }
 
   askQuestion(imageBytes: string, question: string, detectActions: boolean = false): Observable<AskQuestionResponse> {
-    return this.http.post<AskQuestionResponse>(`${this.apiUrl}:askQuestion`, { 
-      image: imageBytes, 
-      question, 
-      detect_navigational_intent: detectActions 
-    });
+    return this.http.post<AskQuestionResponse>(
+      `${this.apiUrl}:askQuestion`,
+      { 
+        image: imageBytes, 
+        question, 
+        detect_navigational_intent: detectActions 
+      },
+      this.getAiRequestOptions()
+    );
+  }
+
+  private getAiRequestOptions(): { headers?: HttpHeaders } {
+    const geminiKey = this.getGeminiKeyFromUrl();
+    if (!geminiKey) {
+      return {};
+    }
+    return {
+      headers: new HttpHeaders({ 'X-Gemini-Api-Key': geminiKey }),
+    };
+  }
+
+  private getGeminiKeyFromUrl(): string | null {
+    if (typeof window === 'undefined') {
+      return null;
+    }
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const urlKey = params.get('gemini_key') ?? params.get('geminiKey');
+      if (urlKey !== null) {
+        const trimmed = urlKey.trim();
+        if (trimmed) {
+          sessionStorage.setItem('streetreader_gemini_key', trimmed);
+          return trimmed;
+        } else {
+          sessionStorage.removeItem('streetreader_gemini_key');
+          return null;
+        }
+      }
+      return sessionStorage.getItem('streetreader_gemini_key');
+    } catch {
+      return null;
+    }
   }
 }

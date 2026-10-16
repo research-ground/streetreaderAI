@@ -38,11 +38,18 @@ class GeminiService(AIServiceBase):
             self._client = genai.Client(api_key=self.api_key)
         return self._client
 
-    def generate_description(self, image_base64: str) -> str:
+    def get_client(self, api_key: str | None = None):
+        """Returns a Gemini client using an optional per-request API key override."""
+        if api_key and api_key != self.api_key:
+            return genai.Client(api_key=api_key)
+        return self.client
+
+    def generate_description(self, image_base64: str, api_key: str | None = None) -> str:
         """Generates a description of the panorama image."""
         img = self._prepare_image(image_base64)
+        client = self.get_client(api_key)
         
-        response = self.client.models.generate_content(
+        response = client.models.generate_content(
             model=self.model_id,
             contents=[DESCRIPTION_PROMPT, img],
             config=types.GenerateContentConfig(
@@ -52,16 +59,17 @@ class GeminiService(AIServiceBase):
         )
         return response.parsed.description
 
-    def ask_question(self, image_base64: str, question: str, detect_actions: bool = False):
+    def ask_question(self, image_base64: str, question: str, detect_actions: bool = False, api_key: str | None = None):
         """Answers a question and optionally detects potential navigational actions."""
         img = self._prepare_image(image_base64)
+        client = self.get_client(api_key)
         
         if detect_actions:
             prompt = QUESTION_PROMPT.format(question=question)
         else:
             prompt = SIMPLE_QUESTION_PROMPT.format(question=question)
         
-        response = self.client.models.generate_content(
+        response = client.models.generate_content(
             model=self.model_id,
             contents=[prompt, img],
             config=types.GenerateContentConfig(

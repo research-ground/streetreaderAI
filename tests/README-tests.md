@@ -17,20 +17,21 @@ tests/
 │   ├── test_config.py       # Configuration loading, type validation & fallbacks
 │   ├── test_cache.py        # Disk-backed SQLite & in-memory LRU cache policies, spatial lookup & persistence
 │   ├── test_utils.py        # Map math (bearing, distance, relative position)
-│   ├── test_image_utils.py  # PIL equirectangular panorama cropping & wrapping
-│   ├── test_roads.py        # Road network topology, arc-walking, snapping & classification
-│   ├── test_navigate.py     # Stateless navigation (seeding, link building, lane continuity)
-│   ├── test_gemini_service.py # Gemini AI structured output & prompt generation
+│   ├── test_image_utils.py  # OpenCV rectilinear perspective projection (cv2.remap) & panorama cropping
+│   ├── test_roads.py        # OSM road network topology, multi-node intersection clustering & block adjacency
+│   ├── test_navigate.py     # 5-step sequence-slice routing solver, intersection unification & link building
+│   ├── test_gemini_service.py # Gemini AI structured output, prompt generation & API key overrides
 │   ├── test_openai_service.py # OpenAI AI structured output & error handling
 │   ├── test_geocoding_services.py # OSM/Nominatim and Google Geocoding parsing & error logic
 │   ├── test_overpass_road_service.py # Overpass QL query construction & mirror failover
-│   ├── test_mapillary_provider.py # Mapillary metadata parsing & HTTP 503 error handling
+│   ├── test_mapillary_provider.py # Mapillary metadata parsing, sequence fetching & HTTP 503 error handling
+│   ├── test_panoramax_provider.py # Panoramax STAC API metadata, sequence fetching & panorama projection
 │   └── test_api_endpoints.py # Isolated Flask test-client request validation & error models
 │
 ├── integration/             # Live backend API tests against localhost:5001
 │   ├── test_auth.py         # Basic API connectivity & routing sanity check
 │   ├── test_geocoding.py    # Live reverse geocoding, nearby POIs, and autocomplete
-│   ├── test_navigation.py   # Live panorama view resolution and local road graph extraction
+│   ├── test_navigation.py   # Live multi-step street walking, intersection turns, sequence caching & Gemini visual inspection
 │   └── test_ai.py           # Live AI image description & navigational Q&A (skipped if no key)
 │
 └── e2e/                     # End-to-end browser tests

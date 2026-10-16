@@ -98,6 +98,17 @@ def test_describe_image_success(client):
         assert json_data["description"] == "A panoramic view of an open plaza."
 
 
+def test_describe_image_with_gemini_key_override(client):
+    with patch("server.index.ai_service.generate_description") as mock_desc:
+        mock_desc.return_value = "Custom key description."
+        res = client.post(
+            "/v1/streetreader:describeImage?gemini_key=url-override-key",
+            json={"image": "base64str_custom_key"},
+        )
+        assert res.status_code == 200
+        mock_desc.assert_called_once_with("base64str_custom_key", api_key="url-override-key")
+
+
 def test_ask_question_missing_fields(client):
     res = client.post("/v1/streetreader:askQuestion", json={"image": "base64str"})
     assert res.status_code == 400
