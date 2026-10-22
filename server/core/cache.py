@@ -20,7 +20,7 @@ import sqlite3
 import threading
 import time
 from collections import OrderedDict
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from server.core.config import config
 from server.core.logger import logger

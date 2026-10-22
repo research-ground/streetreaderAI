@@ -16,18 +16,6 @@
 
 import pytest
 
-def test_resolve_address_from_coords(api_client):
-    """
-    Test reverse geocoding to get a street address from coordinates.
-    """
-    resp = api_client.resolve_address(lat=40.7484405, lng=-73.9856644)
-
-    assert resp.status_code == 200
-    data = resp.json()
-    assert isinstance(data, dict)
-    assert "address" in data
-    assert len(data["address"]) > 0
-
 
 def test_search_nearby_places(api_client):
     """

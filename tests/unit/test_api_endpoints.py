@@ -17,7 +17,7 @@
 import pytest
 from unittest.mock import patch, MagicMock
 from server.index import app
-from server.core.models import ViewResponse, ChatResponse
+from server.core.models import ViewResponse, RenderViewResponse, ChatResponse
 
 
 @pytest.fixture
@@ -33,23 +33,31 @@ def test_api_help_endpoint(client):
     assert "StreetReaderAI API Reference" in res.get_data(as_text=True)
 
 
-def test_resolve_address_missing_coordinates(client):
-    res = client.post("/v1/streetreader:resolveAddress", json={})
+def test_render_view_missing_image_id(client):
+    res = client.post("/v1/streetreader:renderView", json={})
     assert res.status_code == 400
     json_data = res.get_json()
     assert json_data["success"] is False
-    assert "Missing coordinates" in json_data["message"]
+    assert "Missing imageId" in json_data["message"]
 
 
-def test_resolve_address_success(client):
-    with patch("server.index.location_service.reverse_geocode") as mock_rev:
-        mock_rev.return_value = {"formatted_address": "742 Evergreen Terrace"}
-        res = client.post("/v1/streetreader:resolveAddress", json={
-            "coordinates": {"latitude": 44.0, "longitude": -123.0}
+def test_render_view_success(client):
+    with patch("server.index.route_provider.render_view") as mock_render:
+        mock_render.return_value = RenderViewResponse(
+            imageId="img_123",
+            image="base64crop",
+            actualHeading=90.0,
+        )
+        res = client.post("/v1/streetreader:renderView", json={
+            "imageId": "img_123",
+            "heading": 90.0,
+            "pitch": 0.0,
         })
         assert res.status_code == 200
         json_data = res.get_json()
-        assert json_data["address"] == "742 Evergreen Terrace"
+        assert json_data["imageId"] == "img_123"
+        assert json_data["image"] == "base64crop"
+        assert json_data["actualHeading"] == 90.0
 
 
 def test_search_nearby_places_missing_location(client):
@@ -157,15 +165,11 @@ def test_autocomplete_place(client):
         assert json_data["suggestions"][0]["placeId"] == "place_10"
 
 
-def test_config_endpoints(client):
+def test_config_endpoint(client):
     res = client.get("/v1/streetreader:config")
     assert res.status_code == 200
     json_data = res.get_json()
     assert json_data.get("startingAddress") == "601 N 34th St, Seattle, WA"
-
-    res_api = client.get("/api/config")
-    assert res_api.status_code == 200
-    assert res_api.get_json().get("startingAddress") == "601 N 34th St, Seattle, WA"
 
 
 def test_cache_stats_endpoint(client):

@@ -58,16 +58,6 @@ class StreetReaderAPIClient:
             logger.error(f"API EXCEPTION: {str(e)}")
             raise
 
-    def resolve_address(self, lat: float, lng: float) -> requests.Response:
-        """Retrieves the formatted street address for a given set of coordinates."""
-        payload = {
-            "coordinates": {
-                "latitude": lat,
-                "longitude": lng
-            }
-        }
-        return self._post("resolveAddress", payload)
-
     def search_nearby_places(self, lat: float, lng: float) -> requests.Response:
         """Finds nearby Points of Interest (POIs) relative to a specific location."""
         payload = {
@@ -86,12 +76,20 @@ class StreetReaderAPIClient:
         if canonical_node_id:
             payload["canonicalNodeId"] = canonical_node_id
         if image_id:
-            payload["name"] = image_id
+            payload["imageId"] = image_id
         if lat is not None and lng is not None:
             payload["coordinates"] = {"latitude": lat, "longitude": lng}
         if address:
             payload["address"] = address
         return self._post("generatePanoramaView", payload)
+
+    def render_view(self, image_id: str, heading: float = 0.0, pitch: float = 0.0) -> requests.Response:
+        """Pure viewport re-crop for an already-known imageId."""
+        return self._post("renderView", {
+            "imageId": image_id,
+            "heading": heading,
+            "pitch": pitch,
+        })
 
     def describe_image(self, image_bytes: str) -> requests.Response:
         """Generates an AI-powered visual description of the provided image."""

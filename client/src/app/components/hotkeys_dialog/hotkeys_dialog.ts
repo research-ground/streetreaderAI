@@ -89,6 +89,32 @@ import { StateService } from '../../services/state_service';
           }
         </div>
       </section>
+
+      <section class="attribution-section">
+        <h3>Data Sources &amp; Attribution</h3>
+        <ul class="attribution-list">
+          <li>
+            <strong>Road Network &amp; Map Data:</strong>
+            &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap contributors</a>, licensed under the <a href="https://opendatacommons.org/licenses/odbl/" target="_blank" rel="noopener noreferrer">Open Database License (ODbL)</a>.
+          </li>
+          <li>
+            <strong>Street-Level Imagery (Mapillary):</strong>
+            &copy; <a href="https://www.mapillary.com/" target="_blank" rel="noopener noreferrer">Mapillary</a> contributors, licensed under <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer">CC BY-SA 4.0</a>.
+          </li>
+          <li>
+            <strong>Street-Level Imagery (Panoramax):</strong>
+            &copy; <a href="https://panoramax.xyz/" target="_blank" rel="noopener noreferrer">Panoramax</a> contributors (IGN / OpenStreetMap France community instances), licensed under <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer">CC BY-SA 4.0</a> / <a href="https://www.etalab.gouv.fr/licence-ouverte-open-licence/" target="_blank" rel="noopener noreferrer">Etalab Open Licence 2.0</a>.
+          </li>
+          <li>
+            <strong>Geocoding &amp; Places:</strong>
+            Powered by <a href="https://developers.google.com/maps" target="_blank" rel="noopener noreferrer">Google Maps Platform</a> (&copy; Google) and <a href="https://nominatim.openstreetmap.org/" target="_blank" rel="noopener noreferrer">OpenStreetMap Nominatim</a>.
+          </li>
+          <li>
+            <strong>AI Scene Descriptions &amp; Q&amp;A:</strong>
+            Powered by <a href="https://ai.google.dev/" target="_blank" rel="noopener noreferrer">Google Gemini</a> (&copy; Google).
+          </li>
+        </ul>
+      </section>
     </mat-dialog-content>
     <mat-dialog-actions align="end">
       <button mat-button (click)="dialogRef.close()">Close</button>

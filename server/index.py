@@ -31,7 +31,7 @@ from server.core.cache import (
 from server.core.config import config
 from server.core.logger import logger, log_call
 from server.core.exceptions import APIException
-from server.core.models import AddressResponse, LatLng, NearbyPlacesResponse, POI, RelativePosition
+from server.core.models import LatLng, NearbyPlacesResponse, POI, RelativePosition
 from server.routing.route_provider import RouteProvider
 from server.routing.map_math import get_relative_position
 
@@ -126,22 +126,21 @@ def handle_general_exception(e):
 @app.route('/v1/streetreader:generatePanoramaView', methods=['POST'])
 @log_call
 def view_location():
-    data = request.json
-    image_id = data.get('name')
+    data = request.json or {}
+    image_id = data.get('imageId')
     canonical_node_id = data.get('canonicalNodeId')
     address = data.get('address')
     heading = data.get('heading', 0)
     pitch = data.get('pitch', 0)
-    image_only = bool(data.get('imageOnly', False))
     coords = data.get('coordinates') or {}
     hint_lat = coords.get('latitude')
     hint_lng = coords.get('longitude')
 
     if not image_id and not canonical_node_id and not address and hint_lat is None:
-        raise APIException("Missing canonicalNodeId, name, coordinates, or address")
+        raise APIException("Missing canonicalNodeId, imageId, coordinates, or address")
 
     logger.info(f"[USER_EVENT] VIEW CHANGE: node={canonical_node_id}, image={image_id}, "
-                f"address={address}, heading={heading}, imageOnly={image_only}")
+                f"address={address}, heading={heading}")
 
     result = route_provider.get_pano_view(
         canonical_node_id=canonical_node_id,
@@ -151,30 +150,35 @@ def view_location():
         lng=hint_lng,
         heading=heading,
         pitch=pitch,
-        image_only=image_only,
     )
     return jsonify(result.model_dump())
 
-@app.route('/v1/streetreader:resolveAddress', methods=['POST'])
+
+@app.route('/v1/streetreader:renderView', methods=['POST'])
 @log_call
-def address_info():
-    data = request.json
-    coords = data.get('coordinates') or {}
-    lat = coords.get('latitude')
-    lng = coords.get('longitude')
+def render_view():
+    data = request.json or {}
+    image_id = data.get('imageId')
+    heading = data.get('heading', 0)
+    pitch = data.get('pitch', 0)
 
-    if lat is None or lng is None:
-        raise APIException("Missing coordinates (latitude/longitude)")
+    if not image_id:
+        raise APIException("Missing imageId")
 
-    res = location_service.reverse_geocode(lat, lng, result_type="street_address|route")
-    if not res:
-        raise APIException("Could not find street address for these coordinates.")
-    return jsonify(AddressResponse(address=res["formatted_address"]).model_dump())
+    logger.info(f"[USER_EVENT] RENDER VIEW: image={image_id}, heading={heading}")
+
+    result = route_provider.render_view(
+        image_id=image_id,
+        heading=heading,
+        pitch=pitch,
+    )
+    return jsonify(result.model_dump())
+
 
 @app.route('/v1/streetreader:searchNearbyPlaces', methods=['POST'])
 @log_call
 def nearby_places():
-    data = request.json
+    data = request.json or {}
     location = data.get('location') or {}
     lat = location.get('latitude')
     lng = location.get('longitude')
@@ -304,7 +308,6 @@ def get_help():
         return f"Error reading api_reference.md: {str(e)}", 500
 
 @app.route('/v1/streetreader:config', methods=['GET'])
-@app.route('/api/config', methods=['GET'])
 def get_config():
     start_addr = (
         config.PANORAMAX_STARTING_ADDRESS

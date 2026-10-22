@@ -52,34 +52,31 @@ export interface Link {
   status: ImageStatus;
   captureTime?: string | null;
   isPano?: boolean;
-  lane?: 'right' | 'left' | 'center' | null;
   /** Road tangent at the landing node in the direction of travel — the heading
    * to adopt on arrival so the view faces down the road (matters on curves). */
   arrivalHeading?: number | null;
 }
 
-export interface PanoramaMetadata {
-  coordinates: LatLng;
-  captureTime: string;
-}
-
 export interface GetViewResponse {
   success?: boolean;
   image?: string | null;
-  name?: string | null;              // image_id when present
+  imageId?: string | null;
   canonicalNodeId?: string;
   actualHeading: number;
-  panoramaMetadata?: PanoramaMetadata;
+  coordinates?: LatLng;
+  captureTime?: string;
+  address?: string | null;
   links?: Link[];
   status: ImageStatus;
   message?: string | null;
-  lane?: 'right' | 'left' | 'center' | null;
   isPano?: boolean;
 }
 
-export interface GetAddressResponse {
+export interface RenderViewResponse {
   success?: boolean;
-  address: string;
+  imageId: string;
+  image: string;
+  actualHeading: number;
 }
 
 export interface RelativePosition {
@@ -181,33 +178,37 @@ export class ApiService {
     coordinates?: LatLng;
     heading?: number;
     pitch?: number;
-    imageOnly?: boolean;
   }): Observable<GetViewResponse> {
     const payload: Record<string, unknown> = {
       heading: params.heading,
       pitch: params.pitch,
     };
     if (params.canonicalNodeId) payload['canonicalNodeId'] = params.canonicalNodeId;
-    if (params.imageId) payload['name'] = params.imageId;
+    if (params.imageId) payload['imageId'] = params.imageId;
     if (params.address) payload['address'] = params.address;
     if (params.coordinates) payload['coordinates'] = params.coordinates;
-    if (params.imageOnly) payload['imageOnly'] = true;
 
     return this.http.post<GetViewResponse>(`${this.apiUrl}:generatePanoramaView`, payload).pipe(
-      tap(res => console.log('View node:', res.canonicalNodeId, 'image:', res.name, 'status:', res.status))
+      tap(res => console.log('View node:', res.canonicalNodeId, 'image:', res.imageId, 'status:', res.status))
     );
   }
 
-  getAddress(lat: number, lng: number): Observable<GetAddressResponse> {
-    return this.http.post<GetAddressResponse>(`${this.apiUrl}:resolveAddress`, { 
-        coordinates: { latitude: lat, longitude: lng } 
+  renderView(params: {
+    imageId: string;
+    heading?: number;
+    pitch?: number;
+  }): Observable<RenderViewResponse> {
+    return this.http.post<RenderViewResponse>(`${this.apiUrl}:renderView`, {
+      imageId: params.imageId,
+      heading: params.heading ?? 0,
+      pitch: params.pitch ?? 0,
     });
   }
 
   getNearbyPlaces(params: { lat: number; lng: number; radius?: number; heading?: number }): Observable<GetNearbyPlacesResponse> {
     const payload = {
-        location: { latitude: params.lat, longitude: params.lng },
-        heading: params.heading,
+      location: { latitude: params.lat, longitude: params.lng },
+      heading: params.heading,
     };
     return this.http.post<GetNearbyPlacesResponse>(`${this.apiUrl}:searchNearbyPlaces`, payload);
   }

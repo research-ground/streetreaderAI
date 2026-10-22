@@ -63,27 +63,24 @@ class NavigationLink(ApiModel):
     status: str = "ok"            # "ok" | "path_only"
     captureTime: Optional[str] = None   # landing image capture time (epoch ms string)
     isPano: bool = False                # landing image is panoramic
-    lane: Optional[str] = None          # "right" | "left" | "center" in the travel frame
     arrivalHeading: Optional[float] = None  # road tangent at the landing node (deg)
-
-class PanoramaMetadata(ApiModel):
-    """Metadata container nested inside generatePanoramaView response."""
-    coordinates: LatLng
-    captureTime: str
 
 class ViewResponse(StandardResponse):
     image: Optional[str] = None
-    name: Optional[str] = None                  # image_id when available
+    imageId: Optional[str] = None               # image_id when available
     canonicalNodeId: Optional[str] = None       # canonical location the user is at
     actualHeading: Optional[float] = None
-    panoramaMetadata: Optional[PanoramaMetadata] = None
+    coordinates: Optional[LatLng] = None
+    captureTime: str = ""
+    address: Optional[str] = None
     links: Optional[List[NavigationLink]] = None
     status: str = "ok"                          # "ok" | "path_only"
-    lane: Optional[str] = None                  # viewing lane: "right" | "left" | "center"
     isPano: bool = False
 
-class AddressResponse(StandardResponse):
-    address: Optional[str] = None
+class RenderViewResponse(StandardResponse):
+    imageId: str
+    image: str
+    actualHeading: float = 0.0
 
 class RelativePosition(ApiModel):
     side: str # e.g. RIGHT

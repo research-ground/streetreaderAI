@@ -15,7 +15,7 @@
  */
 
 import { Injectable, inject } from '@angular/core';
-import { ApiService, GetViewResponse, Link } from './api_service';
+import { ApiService, GetViewResponse, Link, RenderViewResponse } from './api_service';
 import { StateService } from './state_service';
 import { DescriptionService } from './description_service';
 import { ToastService } from './toast_service';
@@ -31,6 +31,7 @@ interface CachedNode {
   imageId: string | null;
   lat: number;
   lng: number;
+  address?: string;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -43,73 +44,107 @@ export class NavigationService {
 
   private nodeCache = new Map<string, CachedNode>();
   private viewSub?: Subscription;
-  private addressSub?: Subscription;
-  private hasResolvedInitialAddress = false;
 
   /** Address entered manually. One request: the view endpoint geocodes,
-   * anchors, and returns image + links together. */
+   * anchors, and returns image + links + address together. */
   loadAddress(address: string) {
-    this.hasResolvedInitialAddress = false;
     this.land({ address, heading: this.stateService.currentHeading() });
   }
 
   /** Initial-boot address load with an explicit facing heading. */
   loadLocationWithHeading(address?: string, heading: number = 0) {
-    this.hasResolvedInitialAddress = false;
     this.land({ address, heading });
   }
 
   /** Jump directly to known coordinates and facing heading (used by Demo Mode). */
   loadCoordinates(lat: number, lng: number, heading: number = 0) {
-    this.hasResolvedInitialAddress = false;
     this.stateService.setHeading(heading);
     this.land({ coordinates: { latitude: lat, longitude: lng }, heading });
   }
 
   /** Navigate to a specific image id (deep link). */
   navigateToImage(imageId: string) {
-    this.hasResolvedInitialAddress = false;
     this.land({ imageId, heading: this.stateService.currentHeading() });
   }
 
   /** Move along an adjacency link. Arrival heading comes from the link itself
    * (the road tangent at the landing), so no server-side alignment is needed.
-   * Previously-visited nodes render from the cache with an image-only request
-   * and keep exactly the links they had — the session never shifts underfoot.
-   * New nodes take a full request. */
+   * Previously-visited nodes render from the cache with a pure renderView
+   * request and keep exactly the links they had — the session never shifts
+   * underfoot. New nodes take a full generatePanoramaView request. */
   navigateToNode(node: Link) {
     const heading = node.arrivalHeading ?? node.heading;
     this.stateService.setHeading(heading);
     const cached = this.nodeCache.get(node.canonicalNodeId);
-    const imageId = cached?.imageId ?? node.imageId ?? undefined;
-    const fromCache = !!(cached?.links?.length && imageId);
+    if (cached && cached.links.length > 0 && cached.imageId) {
+      this.renderCachedNode(node.canonicalNodeId, cached, heading, true);
+      return;
+    }
     this.land({
       canonicalNodeId: node.canonicalNodeId,
-      imageId,
+      imageId: node.imageId ?? undefined,
       coordinates: node.coordinates,
       heading,
-      imageOnly: fromCache,
-      cachedLinks: cached?.links,
     });
   }
 
   /** Rotation / look: same node, new heading. If we've been here, this is a
-   * pure image re-crop — no road or imagery fetches at all. */
+   * pure image re-crop via renderView — no road or graph fetches at all. */
   updateViewForHeading() {
     const loc = this.stateService.currentLocation();
     if (!loc.canonicalNodeId) return;
+    const heading = this.stateService.currentHeading();
     const cached = this.nodeCache.get(loc.canonicalNodeId);
+    if (cached?.imageId) {
+      this.renderCachedNode(loc.canonicalNodeId, cached, heading, false);
+      return;
+    }
     this.land({
       canonicalNodeId: loc.canonicalNodeId,
-      imageId: cached?.imageId ?? undefined,
       coordinates: { latitude: loc.lat, longitude: loc.lng },
-      heading: this.stateService.currentHeading(),
-      imageOnly: !!cached?.imageId,
-      cachedLinks: cached?.links,
+      heading,
     });
   }
 
-  // ---- the single load path ----
+  private renderCachedNode(
+    canonicalNodeId: string,
+    cached: CachedNode,
+    heading: number,
+    isStepChange: boolean,
+  ) {
+    if (!cached.imageId) return;
+    this.viewSub?.unsubscribe();
+    this.stateService.setLoading(true);
+    this.viewSub = this.apiService.renderView({
+      imageId: cached.imageId,
+      heading,
+    }).subscribe({
+      next: (rendered: RenderViewResponse) => {
+        this.stateService.setImage(rendered.image ?? null);
+        if (rendered.actualHeading !== undefined && rendered.actualHeading !== null) {
+          this.stateService.setHeading(rendered.actualHeading);
+        }
+        if (isStepChange) {
+          this.stateService.updateLocation(
+            cached.lat,
+            cached.lng,
+            rendered.imageId,
+            canonicalNodeId,
+            'ok',
+          );
+          this.stateService.setMetadata({
+            adjacentNodes: cached.links,
+            ...(cached.address ? { address: cached.address } : {}),
+          });
+        }
+        this.stateService.setLoading(false);
+        if (!this.stateService.showWelcome() && !this.stateService.showActivationDialog()) {
+          this.descriptionService.needsRefresh(false);
+        }
+      },
+      error: (err) => this.reportError(err, 'Location Error'),
+    });
+  }
 
   private land(params: {
     address?: string;
@@ -117,8 +152,6 @@ export class NavigationService {
     canonicalNodeId?: string;
     coordinates?: { latitude: number; longitude: number };
     heading: number;
-    imageOnly?: boolean;
-    cachedLinks?: Link[];
   }) {
     this.viewSub?.unsubscribe();
     this.stateService.setLoading(true);
@@ -128,28 +161,39 @@ export class NavigationService {
       address: params.address,
       coordinates: params.coordinates,
       heading: params.heading,
-      imageOnly: params.imageOnly,
     }).subscribe({
       next: (view) => this.applyView(view, params),
       error: (err) => this.reportError(err, 'Location Error'),
     });
   }
 
-  private applyView(view: GetViewResponse, params: { coordinates?: { latitude: number; longitude: number }; cachedLinks?: Link[]; heading: number; imageOnly?: boolean }) {
+  private applyView(
+    view: GetViewResponse,
+    params: { coordinates?: { latitude: number; longitude: number }; heading: number },
+  ) {
     const nodeId = view.canonicalNodeId ?? null;
-    const coords = view.panoramaMetadata?.coordinates ?? params.coordinates ?? null;
+    const coords = view.coordinates ?? params.coordinates ?? null;
     this.stateService.setImage(view.image ?? null);
     if (view.actualHeading !== undefined && view.actualHeading !== null) {
       this.stateService.setHeading(view.actualHeading);
     }
     if (nodeId && coords) {
-      this.stateService.updateLocation(coords.latitude, coords.longitude, view.name ?? null, nodeId, view.status ?? 'ok');
+      this.stateService.updateLocation(
+        coords.latitude,
+        coords.longitude,
+        view.imageId ?? null,
+        nodeId,
+        view.status ?? 'ok',
+      );
     }
 
-    const links = view.links?.length ? view.links : (params.cachedLinks ?? []);
-    this.cacheFromView(view, coords ?? undefined);
-    // Links are usable immediately; address + POIs fill in right after.
-    this.stateService.setMetadata({ adjacentNodes: links });
+    const links = view.links ?? [];
+    const address =
+      view.address?.trim() ||
+      this.streetLabelFromLinks(nodeId, links) ||
+      'Unknown Address';
+    this.cacheFromView(view, coords ?? undefined, address);
+    this.stateService.setMetadata({ adjacentNodes: links, address });
     this.stateService.setLoading(false);
 
     if (view.status === 'path_only' && view.message) {
@@ -158,46 +202,40 @@ export class NavigationService {
     if (!this.stateService.showWelcome() && !this.stateService.showActivationDialog()) {
       this.descriptionService.needsRefresh(false);
     }
+  }
 
-    if (coords && !params.imageOnly) {
-      const streetNames = Array.from(
-        new Set(
-          links
-            .map((l) => l.streetName?.trim())
-            .filter((s): s is string => !!s && s.length > 0),
-        ),
-      );
-      if (this.hasResolvedInitialAddress && streetNames.length > 0) {
-        const label =
-          nodeId?.startsWith('osm_') && streetNames.length >= 2
-            ? `${streetNames[0]} & ${streetNames[1]}`
-            : streetNames[0];
-        this.stateService.setMetadata({ address: label });
-      } else {
-        this.addressSub?.unsubscribe();
-        this.addressSub = this.apiService.getAddress(coords.latitude, coords.longitude).subscribe({
-          next: (address) => {
-            this.hasResolvedInitialAddress = true;
-            this.stateService.setMetadata({
-              address: address?.address ?? (streetNames[0] || 'Unknown Address'),
-            });
-          },
-          error: () => this.stateService.setMetadata({ address: streetNames[0] || 'Unknown Address' }),
-        });
-      }
+  private streetLabelFromLinks(nodeId: string | null, links: Link[]): string | null {
+    const streetNames = Array.from(
+      new Set(
+        links
+          .map((l) => l.streetName?.trim())
+          .filter((s): s is string => !!s && s.length > 0 && s !== 'Unnamed Street'),
+      ),
+    );
+    if (streetNames.length === 0) {
+      return null;
     }
+    if (nodeId?.startsWith('osm_') && streetNames.length >= 2) {
+      return `${streetNames[0]} & ${streetNames[1]}`;
+    }
+    return streetNames[0];
   }
 
   /** Cache the viewed (traversed) node so revisits replay identically. */
-  private cacheFromView(view: GetViewResponse, coords?: { latitude: number; longitude: number }) {
+  private cacheFromView(
+    view: GetViewResponse,
+    coords?: { latitude: number; longitude: number },
+    address?: string,
+  ) {
     const nodeId = view.canonicalNodeId;
-    const at = view.panoramaMetadata?.coordinates ?? coords;
+    const at = view.coordinates ?? coords;
     if (nodeId && at && view.links?.length) {
       this.nodeCache.set(nodeId, {
         links: view.links,
-        imageId: view.name ?? null,
+        imageId: view.imageId ?? null,
         lat: at.latitude,
         lng: at.longitude,
+        address,
       });
     }
   }

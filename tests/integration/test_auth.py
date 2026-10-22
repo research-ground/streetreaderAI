@@ -21,7 +21,7 @@ def test_api_connectivity(api_client):
     """
     Test that the API is reachable.
     """
-    resp = api_client.resolve_address(lat=40.7484405, lng=-73.9856644)
+    resp = api_client.autocomplete_place(query="Pike Place Market")
     
     assert resp.status_code == 200, f"Connectivity failed: Received {resp.status_code}"
     assert resp.text is not None

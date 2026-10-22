@@ -48,7 +48,7 @@ from server.core.models import (
     LocalGraphResponse,
     LocationMetadata,
     NavigationLink,
-    PanoramaMetadata,
+    RenderViewResponse,
     ViewResponse,
 )
 from server.routing.map_math import calculate_distance
@@ -940,13 +940,49 @@ class RouteProvider:
             self._tile_snapshots[t_key] = snap
         return snap
 
-    def _geocode(self, address: str) -> Tuple[float, float, Optional[str]]:
+    def _geocode(self, address: str) -> Tuple[float, float, Optional[str], Optional[str]]:
         if self.location is None:
             raise APIException("No geocoding service configured.")
         geo = self.location.geocode(address)
         if not geo or "lat" not in geo or "lng" not in geo:
             raise APIException(f"Could not locate address: {address}")
-        return float(geo["lat"]), float(geo["lng"]), geo.get("street") or address.split(",")[0].strip()
+        formatted = geo.get("address") or address
+        return float(geo["lat"]), float(geo["lng"]), geo.get("street") or address.split(",")[0].strip(), formatted
+
+    @staticmethod
+    def _street_label_from_names(street_names: Iterable[str]) -> Optional[str]:
+        streets: List[str] = []
+        for s in street_names:
+            st = (s or "").strip()
+            if st and st != "Unnamed Street" and st not in streets:
+                streets.append(st)
+        if len(streets) >= 2:
+            return f"{streets[0]} & {streets[1]}"
+        if len(streets) == 1:
+            return streets[0]
+        return None
+
+    def _resolve_node_address(
+        self,
+        place: NodePlace,
+        links: List[NavigationLink],
+        geocoded_address: Optional[str] = None,
+    ) -> Optional[str]:
+        if geocoded_address:
+            return geocoded_address
+        label = self._street_label_from_names(
+            list(place.street_names) + [l.streetName for l in links]
+        )
+        if label:
+            return label
+        if self.location is not None:
+            try:
+                rev = self.location.reverse_geocode(place.lat, place.lng)
+                if isinstance(rev, dict) and rev.get("formatted_address"):
+                    return rev["formatted_address"]
+            except Exception as e:
+                logger.warning(f"Reverse geocoding fallback failed at ({place.lat}, {place.lng}): {e}")
+        return None
 
     @staticmethod
     def _to_nav_link(out: OutLink) -> NavigationLink:
@@ -970,20 +1006,40 @@ class RouteProvider:
             out_links = snap.adj.get(node_id, [])
             if node.image is None or not out_links:
                 continue
+            nav_links = [self._to_nav_link(out) for out in out_links]
+            address = self._street_label_from_names(
+                list(node.street_names) + [l.streetName for l in nav_links]
+            )
             payload = {
-                "name": node.image.imageId,
+                "imageId": node.image.imageId,
                 "canonicalNodeId": node.node_id,
-                "panoramaMetadata": {
-                    "coordinates": {"latitude": node.lat, "longitude": node.lng},
-                    "captureTime": node.image.captureTime or "",
-                },
-                "links": [self._to_nav_link(out).model_dump() for out in out_links],
+                "coordinates": {"latitude": node.lat, "longitude": node.lng},
+                "captureTime": node.image.captureTime or "",
+                "address": address,
+                "links": [l.model_dump() for l in nav_links],
                 "status": "ok",
-                "lane": None,
                 "isPano": bool(node.image.isPano),
             }
             graph_cache.put(self._node_cache_key(node_id, None), payload)
             graph_cache.put(self._node_cache_key(node_id, node.image.imageId), payload)
+
+    def render_view(
+        self,
+        image_id: str,
+        heading: float = 0,
+        pitch: float = 0,
+    ) -> RenderViewResponse:
+        if not image_id:
+            raise APIException("Missing imageId.")
+        image_data = self.imagery.get_image(image_id, heading, pitch)
+        if not image_data:
+            self.broken_image_ids.add(image_id)
+            raise APIException("Failed to retrieve image data.")
+        return RenderViewResponse(
+            imageId=image_id,
+            image=image_data["image"],
+            actualHeading=image_data["actualHeading"],
+        )
 
     def get_pano_view(
         self,
@@ -994,36 +1050,30 @@ class RouteProvider:
         lng: Optional[float] = None,
         heading: float = 0,
         pitch: float = 0,
-        image_only: bool = False,
     ) -> ViewResponse:
-        if image_only and image_id:
-            image_data = self.imagery.get_image(image_id, heading, pitch)
-            if not image_data:
-                raise APIException("Failed to retrieve image data.")
-            return ViewResponse(
-                image=image_data["image"], name=image_id, canonicalNodeId=canonical_node_id,
-                actualHeading=image_data["actualHeading"],
-                panoramaMetadata=PanoramaMetadata(coordinates=LatLng(latitude=lat or 0.0, longitude=lng or 0.0), captureTime=""),
-                links=[], status="ok",
-            )
-
         if canonical_node_id and not canonical_node_id.startswith("osm_") and self._is_cache_enabled():
             cached_node = graph_cache.get(self._node_cache_key(canonical_node_id, image_id)) or graph_cache.get(self._node_cache_key(canonical_node_id, None))
-            if cached_node is not None and cached_node.get("name") and cached_node["name"] not in self.broken_image_ids:
-                cached_img_id = cached_node["name"]
+            cached_img_id = cached_node.get("imageId") if cached_node is not None else None
+            if cached_node is not None and cached_img_id and "coordinates" in cached_node and cached_img_id not in self.broken_image_ids:
                 query_audit.record_cache_hit("graph")
                 image_data = self.imagery.get_image(cached_img_id, heading, pitch)
                 if image_data:
                     return ViewResponse(
-                        image=image_data["image"], name=cached_img_id, canonicalNodeId=cached_node["canonicalNodeId"],
+                        image=image_data["image"],
+                        imageId=cached_img_id,
+                        canonicalNodeId=cached_node["canonicalNodeId"],
                         actualHeading=image_data["actualHeading"],
-                        panoramaMetadata=PanoramaMetadata(**cached_node["panoramaMetadata"]),
+                        coordinates=LatLng(**cached_node["coordinates"]),
+                        captureTime=cached_node.get("captureTime", ""),
+                        address=cached_node.get("address"),
                         links=[NavigationLink(**l) for l in cached_node.get("links", [])],
-                        status=cached_node.get("status", "ok"), isPano=bool(cached_node.get("isPano", True)),
+                        status=cached_node.get("status", "ok"),
+                        isPano=bool(cached_node.get("isPano", True)),
                     )
                 self.broken_image_ids.add(cached_img_id)
 
         street_hint = None
+        geocoded_address: Optional[str] = None
         seed: Optional[Seed] = None
         snap: Optional[AreaSnapshot] = None
         place: Optional[NodePlace] = None
@@ -1051,9 +1101,10 @@ class RouteProvider:
 
         if place is None and address:
             if lat is None or lng is None:
-                lat, lng, street_hint = self._geocode(address)
+                lat, lng, street_hint, geocoded_address = self._geocode(address)
             else:
                 street_hint = address.split(",")[0].strip()
+                geocoded_address = address
 
         if place is None:
             if lat is None or lng is None:
@@ -1069,6 +1120,7 @@ class RouteProvider:
             self.active_sequences.append(ref.sequenceId)
 
         links = [self._to_nav_link(out) for out in build_links(snap, place, ref)]
+        resolved_address = self._resolve_node_address(place, links, geocoded_address=geocoded_address)
 
         if seed is not None and links and ref is not None:
             cam_h = float(ref.heading or 0.0)
@@ -1077,9 +1129,15 @@ class RouteProvider:
 
         if ref is None:
             return ViewResponse(
-                image=None, name=None, canonicalNodeId=place.node_id, actualHeading=heading,
-                panoramaMetadata=PanoramaMetadata(coordinates=LatLng(latitude=place.lat, longitude=place.lng), captureTime=""),
-                links=links, status="path_only",
+                image=None,
+                imageId=None,
+                canonicalNodeId=place.node_id,
+                actualHeading=heading,
+                coordinates=LatLng(latitude=place.lat, longitude=place.lng),
+                captureTime="",
+                address=resolved_address,
+                links=links,
+                status="path_only",
                 message="No imagery is available at this location; you can still navigate to nearby points.",
             )
 
@@ -1093,10 +1151,16 @@ class RouteProvider:
             self._cache_solved_graph(snap)
 
         return ViewResponse(
-            image=image_data["image"], name=ref.imageId, canonicalNodeId=place.node_id,
+            image=image_data["image"],
+            imageId=ref.imageId,
+            canonicalNodeId=place.node_id,
             actualHeading=image_data["actualHeading"],
-            panoramaMetadata=PanoramaMetadata(coordinates=LatLng(latitude=place.lat, longitude=place.lng), captureTime=ref.captureTime or ""),
-            links=links, status="ok", isPano=bool(ref.isPano),
+            coordinates=LatLng(latitude=place.lat, longitude=place.lng),
+            captureTime=ref.captureTime or "",
+            address=resolved_address,
+            links=links,
+            status="ok",
+            isPano=bool(ref.isPano),
         )
 
     @log_call
