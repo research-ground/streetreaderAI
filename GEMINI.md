@@ -18,7 +18,7 @@ Welcome! As an AI development assistant (Gemini, Antigravity, Jetski, etc.) work
 * If the dev server is not running when executing browser tools or interactive checks, spin it up in the background (`make start`) rather than asking the developer to manually launch it.
 
 ### 🔑 API & Security Guidelines
-* **External Service Keys**: External service selections (Panoramax vs. Mapillary, OpenStreetMap vs. Google Maps, Gemini vs. OpenAI) and API keys are configured in the in-app **Settings** dialog (`ConfigService`, persisted in `localStorage`).
+* **External Service Keys**: External service selections (`panoramax`, `mapillary`, `osm`, `google`, `gemini`, `openai`) and API keys are configured in `streetreaderai.conf` (git-ignored, templated from `streetreaderai.conf.example`).
 * **Obtaining Keys**: The developer (user) can and will provide actual, functional API keys (e.g. Google Maps, Gemini, and Mapillary keys) when requested by the agent.
 * Avoid hardcoding any credentials or API keys in source files.
 
@@ -52,8 +52,8 @@ Welcome! As an AI development assistant (Gemini, Antigravity, Jetski, etc.) work
 ## 5. Local Setup & Testing Guidelines
 
 ### 🛠️ Setting Up The Repository
-* **Automated Setup**: Run `make setup` (or `npm install`) to install Node.js packages at the repository root.
-* **Configuration**: External service providers and API keys are configured via the in-app Settings dialog (`localStorage`).
+* **Automated Setup**: Run `make setup` (or `npm install`) to install Node.js packages at the repository root and create `streetreaderai.conf` from `streetreaderai.conf.example`.
+* **Configuration**: External service providers and API keys are configured in `streetreaderai.conf`.
 
 ### 🧪 Running Tests
 Always run the local test suite when making changes to verify correctness before pushing:
@@ -62,6 +62,10 @@ Always run the local test suite when making changes to verify correctness before
 ---
 
 ## 6. Routing & Algorithmic Design Rules
+
+### 🛑 Mandatory Approval Before Changing Any Routing / Map Generation Code
+* **DO NOT modify the routing, sequence/point sampling, or map/graph generation algorithms** (including `RouteProviderService`, `ImageryProviderService` sequence/point sampling logic, and `RoadDataService`) **without explicitly describing the exact proposed change first and getting explicit user approval for every single change.**
+* **Why**: The routing and map generation mechanism is extremely sensitive and easy to break in subtle ways that unit tests do not catch and that an AI agent cannot detect on its own. Never "refactor" or "clean up" routing or sampling code on your own initiative.
 
 ### 🧭 Follow Explicit User Direction Over Hidden Heuristics
 * **Strict Adherence**: When the developer specifies the factors or algorithm to use, implement **only** those factors. Never silently introduce or heavily weight unrequested heuristics (such as distance to the OSM road centerline) that override the developer's instructions.
