@@ -1,54 +1,47 @@
-# StreetReaderAI API Reference
+# StreetReaderAI Service & API Reference
 
-This document outlines the API endpoints of the StreetReaderAI server and is the single source of truth for both the client and the server. Each field has exactly one accepted spelling — there are no aliases.
-
----
-
-## Base URL
-
-*   `http://localhost:5001/v1/streetreader`
+This document is the single authoritative reference for the StreetReaderAI client-side service interfaces (`ApiService`), data models, and optional key-sharing proxy endpoints. Each field has exactly one accepted spelling — there are no aliases.
 
 ---
 
-## Authentication
+## Architecture Overview
 
-No authorization key is required to access the StreetReaderAI API endpoints.
+StreetReaderAI executes as a **100% client-side Angular SPA**. All navigation, road-graph solving, equirectangular panorama projection, geocoding, and AI vision calls are orchestrated in the browser through [`ApiService`](../client/src/app/services/api_service.ts), which delegates to:
+
+* [`RouteProviderService`](../client/src/app/services/route_provider_service.ts) — 5-step intersection + sequence-slice routing solver.
+* [`RoadDataService`](../client/src/app/services/road_data_service.ts) — OpenStreetMap v0.6 `/api/0.6/map.json` road network and POI extractor (with Overpass fallback).
+* [`ImageryProviderService`](../client/src/app/services/imagery_provider_service.ts) — Panoramax STAC API and Mapillary Graph API v4 client.
+* [`PanoramaCropService`](../client/src/app/services/panorama_crop_service.ts) — HTML5 `<canvas>` 360° equirectangular-to-rectilinear projection (`1440×1080`).
+* [`LocationProviderService`](../client/src/app/services/location_provider_service.ts) — Geocoding, reverse geocoding, autocomplete, and nearby POI search (OpenStreetMap Nominatim/Overpass or Google Maps Platform).
+* [`AiProviderService`](../client/src/app/services/ai_provider_service.ts) — Multimodal scene description and visual Q&A via Google Gemini (`gemini-3.8-flash`) or OpenAI (`gpt-5.6-terra`).
+* [`ConfigService`](../client/src/app/services/config_service.ts) — Runtime provider configuration, `safeStorage` persistence, environment key injection, and optional key-sharing proxy detection.
 
 ---
 
-## 1. Location & Places
+## 1. Location & Places (`LocationProviderService` / `ApiService`)
 
-### `POST :searchNearbyPlaces`
-Finds nearby Points of Interest (POIs) relative to a specific location.
+### `getNearbyPlaces(lat, lng, radius?, heading?)`
+Finds nearby Points of Interest (POIs) relative to a specific location and computes observer-relative positions (`LEFT`/`RIGHT`, `FRONT`/`BEHIND`).
+* When **OpenStreetMap** is selected, POIs (`node` and building `way` elements with `name` tags) are extracted directly from the already-cached OpenStreetMap v0.6 road tile (`osmPoiTileCache`) with zero extra network calls whenever the user is inside the loaded road tile.
+* When **Google Maps** is selected, calls Places API v1 (`places:searchNearby`), either directly or via `/api/proxy/google/nearby`.
 
-**Request Payload:**
-```json
-{
-  "location": {
-    "latitude": 40.7484405,
-    "longitude": -73.9856644
-  },
-  "heading": 0.0
-}
-```
-*Note: `heading` is optional (defaults to `0.0`) and is used to compute the observer-relative position (`relativePosition.side` and `relativePosition.depth`) for each POI.*
-
-**Response Payload:**
+**Response Interface (`GetNearbyPlacesResponse`):**
 ```json
 {
   "places": [
     {
-      "name": "Congestion relief zone",
+      "name": "Fremont Troll",
+      "vicinity": "North 36th Street",
       "location": {
-        "latitude": 40.748428499999996,
-        "longitude": -73.9856429
+        "latitude": 47.65095,
+        "longitude": -122.34727
       },
       "types": [
-        "regulated_area"
+        "tourism:attraction"
       ],
       "relativePosition": {
-        "side": "RIGHT",
-        "depth": "BEHIND"
+        "side": "LEFT",
+        "depth": "FRONT"
       }
     }
   ]
@@ -57,18 +50,12 @@ Finds nearby Points of Interest (POIs) relative to a specific location.
 
 ---
 
-### `POST :autocompletePlace`
-Provides an address suggestions proxy for place lookups.
+### `getAutocompleteSuggestions(query, sessionToken?)`
+Provides place and address suggestions.
+* **OpenStreetMap**: Throttled (minimum 3 characters, 500ms debounce in UI) and cached in `metadataCache` against Nominatim `/search`.
+* **Google Maps**: Calls Places API v1 (`places:autocomplete`), either directly or via `/api/proxy/google/autocomplete`.
 
-**Request Payload:**
-```json
-{
-  "query": "1600 Amphithe",
-  "session_token": "unique-session-string"
-}
-```
-
-**Response Payload:**
+**Response Interface (`AutocompleteResponse`):**
 ```json
 {
   "suggestions": [
@@ -82,26 +69,24 @@ Provides an address suggestions proxy for place lookups.
 
 ---
 
-## 2. Navigation & Imagery
+## 2. Navigation & Imagery (`RouteProviderService` / `ApiService`)
 
-### `POST :generatePanoramaView`
-The primary navigation call. Locates a position (by canonical node ID + coordinates,
-by image ID, by coordinates, or directly by address) and returns the rendered view,
-the resolved street/intersection address, and the adjacent navigation links computed
-for that node.
+### `generatePanoramaView(options)`
+The primary navigation method. Locates a position (by `canonicalNodeId` + `coordinates`, by `imageId`, by `coordinates`, or by `address`) and returns the rendered rectilinear viewport (`base64` JPEG), the resolved street/intersection address, and the adjacent navigation links computed for that node.
 
-**Request Payload:**
+**Request Interface (`GeneratePanoramaOptions`):**
 ```json
 {
-  "canonicalNodeId": "seq_3888112701332191",  // OR "address": "411 15th Ave E, Seattle" OR "imageId": "<imageId>"
-  "coordinates": { "latitude": 47.62210, "longitude": -122.31264 },  // required with canonicalNodeId, or standalone seed
-  "imageId": "3888112701332191",              // optional: preferred image at the node or direct image lookup
+  "canonicalNodeId": "seq_3888112701332191",
+  "coordinates": { "latitude": 47.62210, "longitude": -122.31264 },
+  "imageId": "3888112701332191",
+  "address": "411 15th Ave E, Seattle",
   "heading": 90.0,
   "pitch": 0.0
 }
 ```
 
-**Response Payload:**
+**Response Interface (`NavigateResponse`):**
 ```json
 {
   "imageId": "3888112701332191",
@@ -130,19 +115,12 @@ for that node.
 }
 ```
 
-Link fields for the client cache: `arrivalHeading` is the road tangent at the
-landing (adopt it on arrival — no server-side alignment call needed);
-`captureTime` / `isPano` describe the landing image.
-
 ---
 
-### `POST :renderView`
-Pure viewport rendering call. Re-crops an already-known 360° panorama (`imageId`)
-at a new `heading` and `pitch` without solving road geometry or recomputing links.
-Used when rotating in place or stepping onto a previously visited node in the
-client's session cache.
+### `renderView(options)`
+Pure viewport rendering method. Re-crops an already-known 360° panorama (`imageId`) in-browser via `PanoramaCropService` at a new `heading` and `pitch` without re-solving road geometry or recomputing links.
 
-**Request Payload:**
+**Request Interface (`RenderViewOptions`):**
 ```json
 {
   "imageId": "3888112701332191",
@@ -151,7 +129,7 @@ client's session cache.
 }
 ```
 
-**Response Payload:**
+**Response Interface (`RenderViewResponse`):**
 ```json
 {
   "imageId": "3888112701332191",
@@ -162,19 +140,14 @@ client's session cache.
 
 ---
 
-## 3. AI Services
+## 3. AI Services (`AiProviderService` / `ApiService`)
 
-### `POST :describeImage`
-Generates an AI-powered visual description of the provided image using the configured AI provider (Gemini or OpenAI).
+### `describeImage(imageBase64)`
+Generates an AI-powered visual description (2–3 sentences focused on street layout, buildings, and permanent features for blind travelers) using the configured AI provider:
+* **Google Gemini**: `gemini-3.8-flash` (direct REST call or via `POST /api/proxy/gemini`)
+* **OpenAI**: `gpt-5.6-terra`
 
-**Request Payload:**
-```json
-{
-  "image": "base64_encoded_jpeg_string..."
-}
-```
-
-**Response Payload:**
+**Response Interface (`DescribeImageResponse`):**
 ```json
 {
   "description": "This is a wide urban street, characterized by dense, multi-story commercial buildings..."
@@ -183,56 +156,31 @@ Generates an AI-powered visual description of the provided image using the confi
 
 ---
 
-### `POST :askQuestion`
-Answers specific questions about the provided image and can optionally detect navigational intent.
+### `askQuestion(imageBase64, question, detectActions?)`
+Answers specific questions about the current street view image and optionally detects navigational intent when `detectActions` (`chatControlsApp`) is enabled.
 
-**Request Payload:**
-```json
-{
-  "image": "base64_encoded_jpeg_string...",
-  "question": "Go forward to the next intersection",
-  "detect_navigational_intent": true
-}
-```
-
-**Response Payload:**
+**Response Interface (`AskQuestionResponse`):**
 ```json
 {
   "answer": "Moving forward to the next intersection.",
   "navigationalAction": "MOVE_FORWARD"
 }
 ```
-
-*Note: When `detect_navigational_intent` is `true`, `navigationalAction` will be one of: `"MOVE_FORWARD"`, `"MOVE_BACKWARD"`, `"TURN_LEFT"`, `"TURN_RIGHT"`, `"TURN_AROUND"`, or `"NONE"`. When `detect_navigational_intent` is `false`, it is always `"NONE"`.*
+*Note: `navigationalAction` is one of `"MOVE_FORWARD"`, `"MOVE_BACKWARD"`, `"TURN_LEFT"`, `"TURN_RIGHT"`, `"TURN_AROUND"`, or `"NONE"`.*
 
 ---
 
-## 4. Diagnostics & System
+## 4. Diagnostics & Graph Inspection
 
-### `POST :getLocalGraph`
-Returns the solved local navigation graph (unified `osm_<id>` intersections and `seq_<imageId>` block waypoints) within a radius of the given coordinates for map visualization or debugging.
+### `getLocalGraph(lat, lng, radiusMeters?)`
+Returns the solved local navigation graph (unified `osm_<id>` intersections and `seq_<imageId>` block waypoints) within `radiusMeters` (default `80`) for the `RadarViewComponent` mini-map and debugging.
 
-**Request Payload:**
+**Response Interface (`LocalGraphResponse`):**
 ```json
 {
-  "coordinates": {
-    "latitude": 47.62235,
-    "longitude": -122.31283
-  },
-  "radiusMeters": 80
-}
-```
-*Note: `radiusMeters` is optional (defaults to `80`).*
-
-**Response Payload:**
-```json
-{
-  "center": {
-    "latitude": 47.62235,
-    "longitude": -122.31283
-  },
+  "center": { "latitude": 47.62235, "longitude": -122.31283 },
   "radiusMeters": 80.0,
-  "currentNodeId": null,
+  "currentNodeId": "osm_999",
   "nodes": [
     {
       "canonicalNodeId": "osm_999",
@@ -270,24 +218,14 @@ Returns the solved local navigation graph (unified `osm_<id>` intersections and 
 
 ---
 
-### `GET :config`
-Returns public runtime configuration for bootstrapping the client application.
+## 5. Optional Key-Sharing Proxy Endpoints (`proxy/`)
 
-**Response Payload:**
-```json
-{
-  "startingAddress": "601 N 34th St, Seattle, WA",
-  "imageryProvider": "mapillary",
-  "demoMode": false
-}
-```
+When StreetReaderAI is served behind the optional key-sharing proxy (`proxy/server.mjs`), the following endpoints allow sharing **Gemini** (`gemini-3.8-flash`) and **Google Maps** API keys without exposing them to the browser. When a key is provided by the proxy, the corresponding provider selector and key field are **locked** in the UI.
 
----
-
-### `GET :cacheStats`
-Returns current server cache entry counts across all tiers (`image`, `window`, `road`, `metadata`, `graph`, `description`) and live query audit telemetry (`external_calls`, `cache_hits`, `duplicate_queries`).
-
----
-
-### `GET /api/help`
-Returns this API reference document in Markdown format (`text/markdown; charset=utf-8`). Useful for programmatic inspection or runtime help views.
+| Method & Path | Description |
+| :--- | :--- |
+| `GET /api/proxy/status` | Returns `{ "gemini": boolean, "googleMaps": boolean }` indicating which keys are shared by the proxy. |
+| `POST /api/proxy/gemini` | Forwards a Gemini `generateContent` request body to `models/gemini-3.8-flash:generateContent` using the server's `GEMINI_API_KEY`. |
+| `GET /api/proxy/google/geocode` | Forwards `address` or `latlng` query parameters to the Google Geocoding API using the server's `GOOGLE_MAPS_API_KEY`. |
+| `POST /api/proxy/google/autocomplete` | Forwards a Places Autocomplete request body to `places.googleapis.com/v1/places:autocomplete`. |
+| `POST /api/proxy/google/nearby` | Forwards a Places Nearby Search request body to `places.googleapis.com/v1/places:searchNearby`. |

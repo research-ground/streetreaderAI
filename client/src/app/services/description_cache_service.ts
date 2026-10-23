@@ -15,6 +15,7 @@
  */
 
 import { Injectable } from '@angular/core';
+import { safeStorage } from './safe_storage';
 
 @Injectable({
   providedIn: 'root'
@@ -32,21 +33,17 @@ export class DescriptionCacheService {
   }
 
   get(lat: number, lng: number, heading: number, imageId?: string | null): string | null {
-    return localStorage.getItem(this.getKey(lat, lng, heading, imageId));
+    return safeStorage.getItem(this.getKey(lat, lng, heading, imageId));
   }
 
   set(lat: number, lng: number, heading: number, description: string, imageId?: string | null): void {
-    try {
-      localStorage.setItem(this.getKey(lat, lng, heading, imageId), description);
-    } catch (e) {
-      console.error("Failed to write to localStorage. Cache might be full.", e);
-    }
+    safeStorage.setItem(this.getKey(lat, lng, heading, imageId), description);
   }
 
   clear(): void {
-    Object.keys(localStorage).forEach(key => {
+    safeStorage.keys().forEach(key => {
       if (key.startsWith(this.PREFIX)) {
-        localStorage.removeItem(key);
+        safeStorage.removeItem(key);
       }
     });
   }

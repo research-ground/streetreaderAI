@@ -14,7 +14,8 @@
  limitations under the License.
  */
 
-import { Injectable, signal } from '@angular/core';
+import { Injectable, computed, signal } from '@angular/core';
+import { safeStorage } from './safe_storage';
 
 export type ImageryProviderType = 'mapillary' | 'panoramax';
 export type LocationProviderType = 'osm' | 'google';
@@ -28,6 +29,11 @@ export const DEFAULT_GOOGLE_MAPS_BASE_URL = 'https://maps.googleapis.com/maps/ap
 export const DEFAULT_GEMINI_MODEL_ID = 'gemini-3.8-flash';
 export const DEFAULT_OPENAI_MODEL_ID = 'gpt-5.6-terra';
 
+export interface ProxyStatusResponse {
+  gemini?: boolean;
+  googleMaps?: boolean;
+}
+
 const STORAGE_KEYS = {
   imageryProvider: 'streetreader_imagery_provider',
   mapillaryToken: 'streetreader_mapillary_token',
@@ -40,10 +46,37 @@ const STORAGE_KEYS = {
   startingAddress: 'streetreader_starting_address',
 } as const;
 
+function readInjectedEnv(key: string): string {
+  try {
+    const g = globalThis as Record<string, unknown>;
+    const proc = g['process'] as { env?: Record<string, unknown> } | undefined;
+    const fromProc = proc?.env?.[key];
+    if (typeof fromProc === 'string' && fromProc.trim()) {
+      return fromProc.trim();
+    }
+    const fromGlobal = g[`__STREETREADER_${key}__`];
+    if (typeof fromGlobal === 'string' && fromGlobal.trim()) {
+      return fromGlobal.trim();
+    }
+  } catch {
+    // Ignore env read errors
+  }
+  return '';
+}
+
 @Injectable({
   providedIn: 'root',
 })
 export class ConfigService {
+  private readonly _envGeminiKey = signal<string>(
+    readInjectedEnv('GEMINI_API_KEY') || readInjectedEnv('API_KEY')
+  );
+  private readonly _envGoogleMapsKey = signal<string>(
+    readInjectedEnv('GOOGLE_MAPS_API_KEY')
+  );
+  private readonly _geminiProxyEnabled = signal<boolean>(false);
+  private readonly _googleMapsProxyEnabled = signal<boolean>(false);
+
   private readonly _mapillaryToken = signal<string>(
     this.loadString(STORAGE_KEYS.mapillaryToken, '')
   );
@@ -53,7 +86,7 @@ export class ConfigService {
   private readonly _panoramaxBaseUrl = signal<string>(
     this.loadString(STORAGE_KEYS.panoramaxBaseUrl, DEFAULT_PANORAMAX_BASE_URL)
   );
-  private readonly _locationService = signal<LocationProviderType>(
+  private readonly _userLocationService = signal<LocationProviderType>(
     this.loadEnum<LocationProviderType>(
       STORAGE_KEYS.locationService,
       ['osm', 'google'],
@@ -63,7 +96,7 @@ export class ConfigService {
   private readonly _googleMapsApiKey = signal<string>(
     this.loadString(STORAGE_KEYS.googleMapsApiKey, '')
   );
-  private readonly _aiProvider = signal<AiProviderType>(
+  private readonly _userAiProvider = signal<AiProviderType>(
     this.loadEnum<AiProviderType>(
       STORAGE_KEYS.aiProvider,
       ['gemini', 'openai'],
@@ -80,13 +113,42 @@ export class ConfigService {
     this.loadString(STORAGE_KEYS.startingAddress, DEFAULT_STARTING_ADDRESS)
   );
 
+  /** True when Gemini is provided by either the server proxy or AI Studio environment. */
+  readonly isGeminiLocked = computed(
+    () => this._geminiProxyEnabled() || this._envGeminiKey().length > 0
+  );
+
+  /** True when Google Maps is provided by either the server proxy or environment. */
+  readonly isGoogleMapsLocked = computed(
+    () => this._googleMapsProxyEnabled() || this._envGoogleMapsKey().length > 0
+  );
+
+  /** True when Gemini calls should route through `/api/proxy/gemini`. */
+  readonly useGeminiProxy = this._geminiProxyEnabled.asReadonly();
+
+  /** True when Google Maps calls should route through `/api/proxy/google/*`. */
+  readonly useGoogleMapsProxy = this._googleMapsProxyEnabled.asReadonly();
+
   readonly imageryProvider = this._imageryProvider.asReadonly();
   readonly mapillaryToken = this._mapillaryToken.asReadonly();
   readonly panoramaxBaseUrl = this._panoramaxBaseUrl.asReadonly();
-  readonly locationService = this._locationService.asReadonly();
-  readonly googleMapsApiKey = this._googleMapsApiKey.asReadonly();
-  readonly aiProvider = this._aiProvider.asReadonly();
-  readonly geminiApiKey = this._geminiApiKey.asReadonly();
+
+  readonly locationService = computed<LocationProviderType>(() =>
+    this.isGoogleMapsLocked() ? 'google' : this._userLocationService()
+  );
+
+  readonly googleMapsApiKey = computed<string>(() =>
+    this._envGoogleMapsKey() || this._googleMapsApiKey()
+  );
+
+  readonly aiProvider = computed<AiProviderType>(() =>
+    this.isGeminiLocked() ? 'gemini' : this._userAiProvider()
+  );
+
+  readonly geminiApiKey = computed<string>(() =>
+    this._envGeminiKey() || this._geminiApiKey()
+  );
+
   readonly openaiApiKey = this._openaiApiKey.asReadonly();
   readonly startingAddress = this._startingAddress.asReadonly();
 
@@ -94,7 +156,7 @@ export class ConfigService {
   readonly openaiModelId = DEFAULT_OPENAI_MODEL_ID;
 
   private loadImageryProvider(): ImageryProviderType {
-    const saved = localStorage.getItem(STORAGE_KEYS.imageryProvider);
+    const saved = safeStorage.getItem(STORAGE_KEYS.imageryProvider);
     if (saved === 'mapillary' || saved === 'panoramax') {
       return saved;
     }
@@ -103,7 +165,7 @@ export class ConfigService {
   }
 
   private loadString(key: string, fallback: string): string {
-    const val = localStorage.getItem(key);
+    const val = safeStorage.getItem(key);
     return val !== null && val.trim() !== '' ? val.trim() : fallback;
   }
 
@@ -112,68 +174,116 @@ export class ConfigService {
     allowed: readonly T[],
     fallback: T
   ): T {
-    const val = localStorage.getItem(key) as T | null;
+    const val = safeStorage.getItem(key) as T | null;
     return val && allowed.includes(val) ? val : fallback;
+  }
+
+  /**
+   * Probes `/api/proxy/status` to detect if an optional key-sharing proxy is
+   * providing Gemini and/or Google Maps credentials.
+   */
+  async probeProxy(): Promise<void> {
+    if (typeof fetch === 'undefined') return;
+    try {
+      const resp = await fetch('/api/proxy/status', {
+        headers: { Accept: 'application/json' },
+      });
+      if (!resp.ok) return;
+      const contentType = resp.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) return;
+      const status = (await resp.json()) as ProxyStatusResponse;
+      this.applyProxyStatus(status);
+    } catch {
+      // No proxy present — standard pure client-side mode
+    }
+  }
+
+  applyProxyStatus(status: ProxyStatusResponse): void {
+    if (typeof status.gemini === 'boolean') {
+      this._geminiProxyEnabled.set(status.gemini);
+    }
+    if (typeof status.googleMaps === 'boolean') {
+      this._googleMapsProxyEnabled.set(status.googleMaps);
+    }
   }
 
   setImageryProvider(provider: ImageryProviderType): void {
     this._imageryProvider.set(provider);
-    localStorage.setItem(STORAGE_KEYS.imageryProvider, provider);
+    safeStorage.setItem(STORAGE_KEYS.imageryProvider, provider);
   }
 
   setMapillaryToken(token: string): void {
     const trimmed = token.trim();
     this._mapillaryToken.set(trimmed);
-    localStorage.setItem(STORAGE_KEYS.mapillaryToken, trimmed);
+    safeStorage.setItem(STORAGE_KEYS.mapillaryToken, trimmed);
   }
 
   setPanoramaxBaseUrl(url: string): void {
     const trimmed = url.trim().replace(/\/+$/, '') || DEFAULT_PANORAMAX_BASE_URL;
     this._panoramaxBaseUrl.set(trimmed);
-    localStorage.setItem(STORAGE_KEYS.panoramaxBaseUrl, trimmed);
+    safeStorage.setItem(STORAGE_KEYS.panoramaxBaseUrl, trimmed);
   }
 
   setLocationService(service: LocationProviderType): void {
-    this._locationService.set(service);
-    localStorage.setItem(STORAGE_KEYS.locationService, service);
+    if (this.isGoogleMapsLocked()) return;
+    this._userLocationService.set(service);
+    safeStorage.setItem(STORAGE_KEYS.locationService, service);
   }
 
   setGoogleMapsApiKey(key: string): void {
+    if (this.isGoogleMapsLocked()) return;
     const trimmed = key.trim();
     this._googleMapsApiKey.set(trimmed);
-    localStorage.setItem(STORAGE_KEYS.googleMapsApiKey, trimmed);
+    safeStorage.setItem(STORAGE_KEYS.googleMapsApiKey, trimmed);
   }
 
   setAiProvider(provider: AiProviderType): void {
-    this._aiProvider.set(provider);
-    localStorage.setItem(STORAGE_KEYS.aiProvider, provider);
+    if (this.isGeminiLocked()) return;
+    this._userAiProvider.set(provider);
+    safeStorage.setItem(STORAGE_KEYS.aiProvider, provider);
   }
 
   setGeminiApiKey(key: string): void {
+    if (this.isGeminiLocked()) return;
     const trimmed = key.trim();
     this._geminiApiKey.set(trimmed);
-    localStorage.setItem(STORAGE_KEYS.geminiApiKey, trimmed);
+    safeStorage.setItem(STORAGE_KEYS.geminiApiKey, trimmed);
   }
 
   setOpenaiApiKey(key: string): void {
     const trimmed = key.trim();
     this._openaiApiKey.set(trimmed);
-    localStorage.setItem(STORAGE_KEYS.openaiApiKey, trimmed);
+    safeStorage.setItem(STORAGE_KEYS.openaiApiKey, trimmed);
   }
 
   setStartingAddress(address: string): void {
     const trimmed = address.trim() || DEFAULT_STARTING_ADDRESS;
     this._startingAddress.set(trimmed);
-    localStorage.setItem(STORAGE_KEYS.startingAddress, trimmed);
+    safeStorage.setItem(STORAGE_KEYS.startingAddress, trimmed);
   }
 
   hasActiveAiKey(): boolean {
-    return this._aiProvider() === 'gemini'
-      ? this._geminiApiKey().length > 0
-      : this._openaiApiKey().length > 0;
+    if (this.isGeminiLocked()) {
+      return true;
+    }
+    return this.aiProvider() === 'gemini'
+      ? this.geminiApiKey().length > 0
+      : this.openaiApiKey().length > 0;
   }
 
   hasActiveImageryConfig(): boolean {
-    return this._imageryProvider() === 'panoramax' || this._mapillaryToken().length > 0;
+    return (
+      this._imageryProvider() === 'panoramax' ||
+      this._mapillaryToken().length > 0
+    );
+  }
+
+  hasActiveLocationConfig(): boolean {
+    if (this.isGoogleMapsLocked()) {
+      return true;
+    }
+    return (
+      this.locationService() === 'osm' || this.googleMapsApiKey().length > 0
+    );
   }
 }

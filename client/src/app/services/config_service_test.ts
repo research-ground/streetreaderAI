@@ -22,15 +22,16 @@ import {
   DEFAULT_PANORAMAX_BASE_URL,
   DEFAULT_STARTING_ADDRESS,
 } from './config_service';
+import { safeStorage } from './safe_storage';
 
 describe('ConfigService', () => {
   beforeEach(() => {
-    localStorage.clear();
+    safeStorage.clear();
     TestBed.configureTestingModule({});
   });
 
   afterEach(() => {
-    localStorage.clear();
+    safeStorage.clear();
   });
 
   it('defaults to panoramax, osm, and gemini when localStorage is empty', () => {
@@ -72,5 +73,38 @@ describe('ConfigService', () => {
     expect(service.hasActiveAiKey()).toBe(false);
     service.setOpenaiApiKey('sk-test-openai');
     expect(service.hasActiveAiKey()).toBe(true);
+  });
+
+  it('locks Gemini and Google Maps when provided by the key-sharing proxy', () => {
+    const service = TestBed.inject(ConfigService);
+
+    service.setAiProvider('openai');
+    service.setLocationService('osm');
+    expect(service.aiProvider()).toBe('openai');
+    expect(service.locationService()).toBe('osm');
+
+    service.applyProxyStatus({ gemini: true, googleMaps: true });
+
+    expect(service.isGeminiLocked()).toBe(true);
+    expect(service.useGeminiProxy()).toBe(true);
+    expect(service.aiProvider()).toBe('gemini');
+    expect(service.hasActiveAiKey()).toBe(true);
+
+    // Attempting to change locked AI provider or Gemini key should be ignored
+    service.setAiProvider('openai');
+    service.setGeminiApiKey('user-override-attempt');
+    expect(service.aiProvider()).toBe('gemini');
+    expect(service.geminiApiKey()).toBe('');
+
+    expect(service.isGoogleMapsLocked()).toBe(true);
+    expect(service.useGoogleMapsProxy()).toBe(true);
+    expect(service.locationService()).toBe('google');
+    expect(service.hasActiveLocationConfig()).toBe(true);
+
+    // Attempting to change locked Location provider or Google Maps key should be ignored
+    service.setLocationService('osm');
+    service.setGoogleMapsApiKey('user-override-attempt');
+    expect(service.locationService()).toBe('google');
+    expect(service.googleMapsApiKey()).toBe('');
   });
 });

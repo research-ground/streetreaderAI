@@ -1,0 +1,5 @@
+{
+  "name": "StreetReaderAI",
+  "description": "An AI-powered accessibility tool for blind and low-vision travelers to explore and interact with 360° street-level imagery using multimodal AI.",
+  "requestFramePermissions": ["microphone"]
+}

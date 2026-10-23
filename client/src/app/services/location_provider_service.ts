@@ -402,7 +402,8 @@ export class LocationProviderService {
   }
 
   private async googleGeocode(address: string): Promise<GeocodeResult | null> {
-    const key = this.ensureGoogleKey();
+    const useProxy = this.config.useGoogleMapsProxy();
+    const key = useProxy ? '' : this.ensureGoogleKey();
     const norm = address.trim().toLowerCase();
     const cacheKey = `google:fwd:${DEFAULT_GOOGLE_MAPS_BASE_URL}:${norm}`;
     const cached = metadataCache.get(cacheKey) as GeocodeResult | undefined;
@@ -411,12 +412,18 @@ export class LocationProviderService {
       return cached;
     }
 
-    const url = new URL(`${DEFAULT_GOOGLE_MAPS_BASE_URL}/geocode/json`);
-    url.searchParams.set('address', address);
-    url.searchParams.set('key', key);
+    let fetchUrl: string;
+    if (useProxy) {
+      fetchUrl = `/api/proxy/google/geocode?address=${encodeURIComponent(address)}`;
+    } else {
+      const url = new URL(`${DEFAULT_GOOGLE_MAPS_BASE_URL}/geocode/json`);
+      url.searchParams.set('address', address);
+      url.searchParams.set('key', key);
+      fetchUrl = url.toString();
+    }
 
     queryAudit.recordExternal('google_geocode', norm);
-    const resp = await fetch(url.toString());
+    const resp = await fetch(fetchUrl);
     if (!resp.ok) return null;
     const data = await resp.json();
     if (
@@ -451,7 +458,8 @@ export class LocationProviderService {
     lat: number,
     lng: number
   ): Promise<string | null> {
-    const key = this.ensureGoogleKey();
+    const useProxy = this.config.useGoogleMapsProxy();
+    const key = useProxy ? '' : this.ensureGoogleKey();
     const cacheKey = `google:rev:${DEFAULT_GOOGLE_MAPS_BASE_URL}:${lat.toFixed(5)}:${lng.toFixed(5)}`;
     const cached = metadataCache.get(cacheKey) as
       | { formatted_address?: string }
@@ -461,15 +469,21 @@ export class LocationProviderService {
       return cached.formatted_address;
     }
 
-    const url = new URL(`${DEFAULT_GOOGLE_MAPS_BASE_URL}/geocode/json`);
-    url.searchParams.set('latlng', `${lat},${lng}`);
-    url.searchParams.set('key', key);
+    let fetchUrl: string;
+    if (useProxy) {
+      fetchUrl = `/api/proxy/google/geocode?latlng=${encodeURIComponent(`${lat},${lng}`)}`;
+    } else {
+      const url = new URL(`${DEFAULT_GOOGLE_MAPS_BASE_URL}/geocode/json`);
+      url.searchParams.set('latlng', `${lat},${lng}`);
+      url.searchParams.set('key', key);
+      fetchUrl = url.toString();
+    }
 
     queryAudit.recordExternal(
       'google_rev_geocode',
       `${lat.toFixed(5)},${lng.toFixed(5)}`
     );
-    const resp = await fetch(url.toString());
+    const resp = await fetch(fetchUrl);
     if (!resp.ok) return null;
     const data = await resp.json();
     if (
@@ -488,7 +502,8 @@ export class LocationProviderService {
     query: string,
     sessionToken?: string
   ): Promise<AutocompleteItem[]> {
-    const key = this.ensureGoogleKey();
+    const useProxy = this.config.useGoogleMapsProxy();
+    const key = useProxy ? '' : this.ensureGoogleKey();
     queryAudit.recordExternal('google_autocomplete', query.toLowerCase());
     try {
       const body: Record<string, unknown> = { input: query };
@@ -496,13 +511,17 @@ export class LocationProviderService {
         body['sessionToken'] = sessionToken;
       }
       const resp = await fetch(
-        'https://places.googleapis.com/v1/places:autocomplete',
+        useProxy
+          ? '/api/proxy/google/autocomplete'
+          : 'https://places.googleapis.com/v1/places:autocomplete',
         {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Goog-Api-Key': key,
-          },
+          headers: useProxy
+            ? { 'Content-Type': 'application/json' }
+            : {
+                'Content-Type': 'application/json',
+                'X-Goog-Api-Key': key,
+              },
           body: JSON.stringify(body),
         }
       );
@@ -552,7 +571,8 @@ export class LocationProviderService {
       types: string[];
     }>
   > {
-    const key = this.ensureGoogleKey();
+    const useProxy = this.config.useGoogleMapsProxy();
+    const key = useProxy ? '' : this.ensureGoogleKey();
     const cacheKey = `google:nearby:${lat.toFixed(4)}:${lng.toFixed(4)}:${radius}`;
     const cached = metadataCache.get(cacheKey) as
       | Array<{
@@ -574,15 +594,21 @@ export class LocationProviderService {
     );
     try {
       const resp = await fetch(
-        'https://places.googleapis.com/v1/places:searchNearby',
+        useProxy
+          ? '/api/proxy/google/nearby'
+          : 'https://places.googleapis.com/v1/places:searchNearby',
         {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Goog-Api-Key': key,
-            'X-Goog-FieldMask':
-              'places.displayName,places.shortFormattedAddress,places.formattedAddress,places.location,places.types',
-          },
+          headers: useProxy
+            ? {
+                'Content-Type': 'application/json',
+              }
+            : {
+                'Content-Type': 'application/json',
+                'X-Goog-Api-Key': key,
+                'X-Goog-FieldMask':
+                  'places.displayName,places.shortFormattedAddress,places.formattedAddress,places.location,places.types',
+              },
           body: JSON.stringify({
             maxResultCount: 20,
             locationRestriction: {

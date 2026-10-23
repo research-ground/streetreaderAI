@@ -23,3 +23,6 @@ server/.cache/
 *.db
 *.db-wal
 *.db-shm
+
+# Optional key-sharing proxy (excluded from git)
+proxy/

@@ -24,6 +24,7 @@ import { MatDialogModule, MatDialog } from '@angular/material/dialog';
 import { UiService } from './services/ui_service';
 import { StateService } from './services/state_service';
 import { ApiService } from './services/api_service';
+import { ConfigService } from './services/config_service';
 import { HotkeyService } from './services/hotkey_service';
 import { CommandService, AppCommand } from './services/command_service';
 import { NavigationService } from './services/navigation_service';
@@ -63,6 +64,7 @@ export class App implements OnInit, OnDestroy {
   protected uiService = inject(UiService);
   protected stateService = inject(StateService);
   private apiService = inject(ApiService);
+  private configService = inject(ConfigService);
   private commandService = inject(CommandService);
   private navigationService = inject(NavigationService);
   private streetViewLinksService = inject(StreetViewLinksService);
@@ -114,6 +116,23 @@ export class App implements OnInit, OnDestroy {
   ngOnInit() {
     this.commandSubscription = this.commandService.commands$.subscribe(command => this.handleCommand(command));
     this.appController.setTraveling();
+    void this.initializeStartup();
+  }
+
+  private async initializeStartup() {
+    await this.configService.probeProxy();
+
+    const shouldShowWelcome =
+      this.stateService.showWelcome() || !this.configService.hasActiveAiKey();
+
+    if (shouldShowWelcome) {
+      this.stateService.setShowWelcome(true);
+      this.openWelcome();
+    } else if (this.speechOutputService.enabled()) {
+      // If welcome is off but TTS is on, we need an interaction to unlock audio
+      this.openActivationDialog();
+    }
+
     this.apiService.getConfig().subscribe({
       next: (cfg) => {
         this.startingAddress = cfg.startingAddress || '601 N 34th St, Seattle, WA';
@@ -123,13 +142,6 @@ export class App implements OnInit, OnDestroy {
         this.navigationService.loadLocationWithHeading(this.startingAddress, 0);
       }
     });
-
-    if (this.stateService.showWelcome()) {
-      this.openWelcome();
-    } else if (this.speechOutputService.enabled()) {
-      // If welcome is off but TTS is on, we need an interaction to unlock audio
-      this.openActivationDialog();
-    }
   }
 
   ngOnDestroy() {
@@ -220,7 +232,9 @@ export class App implements OnInit, OnDestroy {
         break;
       }
       case 'CLOSE_MODALS':
-        this.dialog.closeAll();
+        if (this.configService.hasActiveAiKey() && !this.stateService.showWelcome()) {
+          this.dialog.closeAll();
+        }
         this.speechOutputService.stop();
         if (document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement) {
           document.activeElement.blur();

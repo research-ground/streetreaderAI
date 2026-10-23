@@ -15,6 +15,7 @@
  */
 
 import { Injectable, signal } from '@angular/core';
+import { safeStorage } from './safe_storage';
 
 @Injectable({
   providedIn: 'root'
@@ -24,9 +25,9 @@ export class SpeechOutputService {
   private readonly RATE_KEY = 'streetreader_speech_rate';
   private readonly VOICE_KEY = 'streetreader_speech_voice';
 
-  private isEnabled = signal(localStorage.getItem(this.ENABLED_KEY) !== 'false'); // Default to true
+  private isEnabled = signal(safeStorage.getItem(this.ENABLED_KEY) !== 'false'); // Default to true
   private currentVoice = signal<SpeechSynthesisVoice | null>(null);
-  private speechRate = signal(parseFloat(localStorage.getItem(this.RATE_KEY) || '1.1'));
+  private speechRate = signal(parseFloat(safeStorage.getItem(this.RATE_KEY) || '1.1'));
   private synthesis = window.speechSynthesis;
   private voices = signal<SpeechSynthesisVoice[]>([]);
   
@@ -53,7 +54,7 @@ export class SpeechOutputService {
         this.voices.set(availableVoices);
         
         // Try to recover the saved voice by name
-        const savedVoiceName = localStorage.getItem(this.VOICE_KEY);
+        const savedVoiceName = safeStorage.getItem(this.VOICE_KEY);
         if (savedVoiceName) {
           const matchedVoice = availableVoices.find(v => v.name === savedVoiceName);
           if (matchedVoice) this.currentVoice.set(matchedVoice);
@@ -75,7 +76,7 @@ export class SpeechOutputService {
   }
 
   setEnabled(enabled: boolean) {
-    localStorage.setItem(this.ENABLED_KEY, enabled.toString());
+    safeStorage.setItem(this.ENABLED_KEY, enabled.toString());
     this.isEnabled.set(enabled);
     if (!enabled) {
       this.stop();
@@ -83,12 +84,12 @@ export class SpeechOutputService {
   }
 
   setRate(rate: number) {
-    localStorage.setItem(this.RATE_KEY, rate.toString());
+    safeStorage.setItem(this.RATE_KEY, rate.toString());
     this.speechRate.set(rate);
   }
 
   setVoice(voice: SpeechSynthesisVoice) {
-    localStorage.setItem(this.VOICE_KEY, voice.name);
+    safeStorage.setItem(this.VOICE_KEY, voice.name);
     this.currentVoice.set(voice);
   }
 

@@ -126,39 +126,49 @@ export class AiProviderService {
     return key;
   }
 
-  private async geminiDescribe(cleanBase64: string): Promise<string> {
+  private async fetchGemini(body: Record<string, unknown>): Promise<Response> {
+    if (this.config.useGeminiProxy()) {
+      return fetch('/api/proxy/gemini', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    }
     const key = this.ensureGeminiKey();
     const modelId = this.config.geminiModelId;
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelId)}:generateContent?key=${encodeURIComponent(key)}`;
-
-    const resp = await fetch(url, {
+    return fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              { text: DESCRIPTION_PROMPT },
-              {
-                inlineData: {
-                  mimeType: 'image/jpeg',
-                  data: cleanBase64,
-                },
+      body: JSON.stringify(body),
+    });
+  }
+
+  private async geminiDescribe(cleanBase64: string): Promise<string> {
+    const resp = await this.fetchGemini({
+      contents: [
+        {
+          parts: [
+            { text: DESCRIPTION_PROMPT },
+            {
+              inlineData: {
+                mimeType: 'image/jpeg',
+                data: cleanBase64,
               },
-            ],
-          },
-        ],
-        generationConfig: {
-          responseMimeType: 'application/json',
-          responseSchema: {
-            type: 'OBJECT',
-            properties: {
-              description: { type: 'STRING' },
             },
-            required: ['description'],
-          },
+          ],
         },
-      }),
+      ],
+      generationConfig: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: 'OBJECT',
+          properties: {
+            description: { type: 'STRING' },
+          },
+          required: ['description'],
+        },
+      },
     });
 
     if (!resp.ok) {
@@ -185,50 +195,42 @@ export class AiProviderService {
     question: string,
     detectActions: boolean
   ): Promise<AskQuestionResponse> {
-    const key = this.ensureGeminiKey();
-    const modelId = this.config.geminiModelId;
     const prompt = buildQuestionPrompt(question, detectActions);
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelId)}:generateContent?key=${encodeURIComponent(key)}`;
-
-    const resp = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              { text: prompt },
-              {
-                inlineData: {
-                  mimeType: 'image/jpeg',
-                  data: cleanBase64,
-                },
-              },
-            ],
-          },
-        ],
-        generationConfig: {
-          responseMimeType: 'application/json',
-          responseSchema: {
-            type: 'OBJECT',
-            properties: {
-              answer: { type: 'STRING' },
-              navigationalAction: {
-                type: 'STRING',
-                enum: [
-                  'TURN_LEFT',
-                  'TURN_RIGHT',
-                  'TURN_AROUND',
-                  'MOVE_FORWARD',
-                  'MOVE_BACKWARD',
-                  'NONE',
-                ],
+    const resp = await this.fetchGemini({
+      contents: [
+        {
+          parts: [
+            { text: prompt },
+            {
+              inlineData: {
+                mimeType: 'image/jpeg',
+                data: cleanBase64,
               },
             },
-            required: ['answer', 'navigationalAction'],
-          },
+          ],
         },
-      }),
+      ],
+      generationConfig: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: 'OBJECT',
+          properties: {
+            answer: { type: 'STRING' },
+            navigationalAction: {
+              type: 'STRING',
+              enum: [
+                'TURN_LEFT',
+                'TURN_RIGHT',
+                'TURN_AROUND',
+                'MOVE_FORWARD',
+                'MOVE_BACKWARD',
+                'NONE',
+              ],
+            },
+          },
+          required: ['answer', 'navigationalAction'],
+        },
+      },
     });
 
     if (!resp.ok) {

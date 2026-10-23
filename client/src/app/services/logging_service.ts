@@ -16,6 +16,7 @@
 
 import { Injectable, inject } from '@angular/core';
 import { CommandService, AppCommand } from './command_service';
+import { safeStorage } from './safe_storage';
 
 export interface LogEntry {
   timestamp: string;
@@ -37,7 +38,7 @@ export class LoggingService {
   }
 
   /**
-   * Logs an event with a timestamp to localStorage.
+   * Logs an event with a timestamp to storage.
    */
   logEvent(event: unknown) {
     const entry: LogEntry = {
@@ -48,26 +49,22 @@ export class LoggingService {
     const logs = this.getLogs();
     logs.push(entry);
 
-    // Keep only the last 500 entries to prevent localStorage from filling up
+    // Keep only the last 500 entries to prevent storage from filling up
     const trimmedLogs = logs.slice(-500);
 
-    try {
-      localStorage.setItem(this.STORAGE_KEY, JSON.stringify(trimmedLogs));
-    } catch (err) {
-      console.error('Failed to save log to localStorage:', err);
-    }
+    safeStorage.setItem(this.STORAGE_KEY, JSON.stringify(trimmedLogs));
   }
 
   /**
-   * Retrieves all logs from localStorage.
+   * Retrieves all logs from storage.
    */
   getLogs(): LogEntry[] {
-    const storedLogs = localStorage.getItem(this.STORAGE_KEY);
+    const storedLogs = safeStorage.getItem(this.STORAGE_KEY);
     if (!storedLogs) return [];
     try {
       return JSON.parse(storedLogs);
     } catch (err) {
-      console.error('Failed to parse logs from localStorage:', err);
+      console.error('Failed to parse logs from storage:', err);
       return [];
     }
   }
@@ -76,6 +73,6 @@ export class LoggingService {
    * Clears all stored logs.
    */
   clearLogs() {
-    localStorage.removeItem(this.STORAGE_KEY);
+    safeStorage.removeItem(this.STORAGE_KEY);
   }
 }

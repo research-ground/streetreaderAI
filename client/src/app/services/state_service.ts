@@ -16,6 +16,7 @@
 
 import { Injectable, signal, computed } from '@angular/core';
 import { Link, NearbyPlace } from './api_service';
+import { safeStorage } from './safe_storage';
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -77,12 +78,12 @@ export class StateService {
     nearbyPOIs: [],
     chatHistory: [],
     isLoading: false,
-    modifierKey: (localStorage.getItem(this.MODIFIER_KEY) as ModifierKey) || 'alt',
-    orientationDisplayMode: (localStorage.getItem(this.ORIENTATION_MODE_KEY) as OrientationDisplayMode) || 'both',
-    chatControlsApp: localStorage.getItem(this.CHAT_CONTROLS_KEY) !== 'false', // Default to true
-    autoDescribe: localStorage.getItem(this.AUTO_DESCRIBE_KEY) !== 'false',
-    showWelcome: localStorage.getItem(this.WELCOME_KEY) !== 'false',
-    screenCurtain: localStorage.getItem(this.CURTAIN_KEY) === 'true',
+    modifierKey: (safeStorage.getItem(this.MODIFIER_KEY) as ModifierKey) || 'alt',
+    orientationDisplayMode: (safeStorage.getItem(this.ORIENTATION_MODE_KEY) as OrientationDisplayMode) || 'both',
+    chatControlsApp: safeStorage.getItem(this.CHAT_CONTROLS_KEY) !== 'false', // Default to true
+    autoDescribe: safeStorage.getItem(this.AUTO_DESCRIBE_KEY) !== 'false',
+    showWelcome: safeStorage.getItem(this.WELCOME_KEY) !== 'false',
+    screenCurtain: safeStorage.getItem(this.CURTAIN_KEY) === 'true',
     showActivationDialog: false
   };
 
@@ -107,32 +108,32 @@ export class StateService {
   });
 
   setModifierKey(key: ModifierKey) {
-    localStorage.setItem(this.MODIFIER_KEY, key);
+    safeStorage.setItem(this.MODIFIER_KEY, key);
     this.appState.update(s => ({ ...s, modifierKey: key }));
   }
 
   setOrientationDisplayMode(mode: OrientationDisplayMode) {
-    localStorage.setItem(this.ORIENTATION_MODE_KEY, mode);
+    safeStorage.setItem(this.ORIENTATION_MODE_KEY, mode);
     this.appState.update(s => ({ ...s, orientationDisplayMode: mode }));
   }
 
   setChatControlsApp(enabled: boolean) {
-    localStorage.setItem(this.CHAT_CONTROLS_KEY, enabled.toString());
+    safeStorage.setItem(this.CHAT_CONTROLS_KEY, enabled.toString());
     this.appState.update(s => ({ ...s, chatControlsApp: enabled }));
   }
 
   setAutoDescribe(enabled: boolean) {
-    localStorage.setItem(this.AUTO_DESCRIBE_KEY, enabled.toString());
+    safeStorage.setItem(this.AUTO_DESCRIBE_KEY, enabled.toString());
     this.appState.update(s => ({ ...s, autoDescribe: enabled }));
   }
 
   setShowWelcome(enabled: boolean) {
-    localStorage.setItem(this.WELCOME_KEY, enabled.toString());
+    safeStorage.setItem(this.WELCOME_KEY, enabled.toString());
     this.appState.update(s => ({ ...s, showWelcome: enabled }));
   }
 
   setScreenCurtain(enabled: boolean) {
-    localStorage.setItem(this.CURTAIN_KEY, enabled.toString());
+    safeStorage.setItem(this.CURTAIN_KEY, enabled.toString());
     this.appState.update(s => ({ ...s, screenCurtain: enabled }));
   }
 
