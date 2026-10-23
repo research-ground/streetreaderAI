@@ -127,13 +127,6 @@ export class AiProviderService {
   }
 
   private async fetchGemini(body: Record<string, unknown>): Promise<Response> {
-    if (this.config.useGeminiProxy()) {
-      return fetch('/api/proxy/gemini', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-    }
     const key = this.ensureGeminiKey();
     const modelId = this.config.geminiModelId;
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelId)}:generateContent?key=${encodeURIComponent(key)}`;

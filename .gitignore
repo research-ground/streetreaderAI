@@ -40,5 +40,3 @@ __pycache__/
 *.db-wal
 *.db-shm
 
-# Optional key-sharing proxy (excluded from git)
-proxy/

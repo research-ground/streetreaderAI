@@ -1,6 +1,6 @@
 # StreetReaderAI Service & API Reference
 
-This document is the single authoritative reference for the StreetReaderAI client-side service interfaces (`ApiService`), data models, and optional key-sharing proxy endpoints. Each field has exactly one accepted spelling — there are no aliases.
+This document is the single authoritative reference for the StreetReaderAI client-side service interfaces (`ApiService`) and data models. Each field has exactly one accepted spelling — there are no aliases.
 
 ---
 
@@ -14,7 +14,7 @@ StreetReaderAI executes as a **100% client-side Angular SPA**. All navigation, r
 * [`PanoramaCropService`](../src/app/services/panorama_crop_service.ts) — HTML5 `<canvas>` 360° equirectangular-to-rectilinear projection (`1440×1080`).
 * [`LocationProviderService`](../src/app/services/location_provider_service.ts) — Geocoding, reverse geocoding, autocomplete, and nearby POI search (OpenStreetMap Nominatim/Overpass or Google Maps Platform).
 * [`AiProviderService`](../src/app/services/ai_provider_service.ts) — Multimodal scene description and visual Q&A via Google Gemini (`gemini-3.8-flash`) or OpenAI (`gpt-5.6-terra`).
-* [`ConfigService`](../src/app/services/config_service.ts) — Runtime provider configuration, `safeStorage` persistence, environment key injection, and optional key-sharing proxy detection.
+* [`ConfigService`](../src/app/services/config_service.ts) — Runtime provider configuration, `safeStorage` persistence, and host environment key detection.
 
 ---
 
@@ -23,7 +23,7 @@ StreetReaderAI executes as a **100% client-side Angular SPA**. All navigation, r
 ### `getNearbyPlaces(lat, lng, radius?, heading?)`
 Finds nearby Points of Interest (POIs) relative to a specific location and computes observer-relative positions (`LEFT`/`RIGHT`, `FRONT`/`BEHIND`).
 * When **OpenStreetMap** is selected, POIs (`node` and building `way` elements with `name` tags) are extracted directly from the already-cached OpenStreetMap v0.6 road tile (`osmPoiTileCache`) with zero extra network calls whenever the user is inside the loaded road tile.
-* When **Google Maps** is selected, calls Places API v1 (`places:searchNearby`), either directly or via `/api/proxy/google/nearby`.
+* When **Google Maps** is selected, calls Places API v1 (`places:searchNearby`).
 
 **Response Interface (`GetNearbyPlacesResponse`):**
 ```json
@@ -53,7 +53,7 @@ Finds nearby Points of Interest (POIs) relative to a specific location and compu
 ### `getAutocompleteSuggestions(query, sessionToken?)`
 Provides place and address suggestions.
 * **OpenStreetMap**: Throttled (minimum 3 characters, 500ms debounce in UI) and cached in `metadataCache` against Nominatim `/search`.
-* **Google Maps**: Calls Places API v1 (`places:autocomplete`), either directly or via `/api/proxy/google/autocomplete`.
+* **Google Maps**: Calls Places API v1 (`places:autocomplete`).
 
 **Response Interface (`AutocompleteResponse`):**
 ```json
@@ -144,7 +144,7 @@ Pure viewport rendering method. Re-crops an already-known 360° panorama (`image
 
 ### `describeImage(imageBase64)`
 Generates an AI-powered visual description (2–3 sentences focused on street layout, buildings, and permanent features for blind travelers) using the configured AI provider:
-* **Google Gemini**: `gemini-3.8-flash` (direct REST call or via `POST /api/proxy/gemini`)
+* **Google Gemini**: `gemini-3.8-flash`
 * **OpenAI**: `gpt-5.6-terra`
 
 **Response Interface (`DescribeImageResponse`):**

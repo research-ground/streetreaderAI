@@ -119,9 +119,7 @@ export class App implements OnInit, OnDestroy {
     void this.initializeStartup();
   }
 
-  private async initializeStartup() {
-    await this.configService.probeProxy();
-
+  private initializeStartup() {
     const shouldShowWelcome =
       this.stateService.showWelcome() || !this.configService.hasActiveAiKey();
 

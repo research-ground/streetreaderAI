@@ -29,11 +29,6 @@ export const DEFAULT_GOOGLE_MAPS_BASE_URL = 'https://maps.googleapis.com/maps/ap
 export const DEFAULT_GEMINI_MODEL_ID = 'gemini-3.8-flash';
 export const DEFAULT_OPENAI_MODEL_ID = 'gpt-5.6-terra';
 
-export interface ProxyStatusResponse {
-  gemini?: boolean;
-  googleMaps?: boolean;
-}
-
 const STORAGE_KEYS = {
   imageryProvider: 'streetreader_imagery_provider',
   mapillaryToken: 'streetreader_mapillary_token',
@@ -74,8 +69,6 @@ export class ConfigService {
   private readonly _envGoogleMapsKey = signal<string>(
     readInjectedEnv('GOOGLE_MAPS_API_KEY')
   );
-  private readonly _geminiProxyEnabled = signal<boolean>(false);
-  private readonly _googleMapsProxyEnabled = signal<boolean>(false);
 
   private readonly _mapillaryToken = signal<string>(
     this.loadString(STORAGE_KEYS.mapillaryToken, '')
@@ -113,21 +106,13 @@ export class ConfigService {
     this.loadString(STORAGE_KEYS.startingAddress, DEFAULT_STARTING_ADDRESS)
   );
 
-  /** True when Gemini is provided by either the server proxy or AI Studio environment. */
-  readonly isGeminiLocked = computed(
-    () => this._geminiProxyEnabled() || this._envGeminiKey().length > 0
-  );
+  /** True when Gemini is provided by the host environment (e.g., Google AI Studio). */
+  readonly isGeminiLocked = computed(() => this._envGeminiKey().length > 0);
 
-  /** True when Google Maps is provided by either the server proxy or environment. */
+  /** True when Google Maps is provided by the host environment. */
   readonly isGoogleMapsLocked = computed(
-    () => this._googleMapsProxyEnabled() || this._envGoogleMapsKey().length > 0
+    () => this._envGoogleMapsKey().length > 0
   );
-
-  /** True when Gemini calls should route through `/api/proxy/gemini`. */
-  readonly useGeminiProxy = this._geminiProxyEnabled.asReadonly();
-
-  /** True when Google Maps calls should route through `/api/proxy/google/*`. */
-  readonly useGoogleMapsProxy = this._googleMapsProxyEnabled.asReadonly();
 
   readonly imageryProvider = this._imageryProvider.asReadonly();
   readonly mapillaryToken = this._mapillaryToken.asReadonly();
@@ -176,35 +161,6 @@ export class ConfigService {
   ): T {
     const val = safeStorage.getItem(key) as T | null;
     return val && allowed.includes(val) ? val : fallback;
-  }
-
-  /**
-   * Probes `/api/proxy/status` to detect if an optional key-sharing proxy is
-   * providing Gemini and/or Google Maps credentials.
-   */
-  async probeProxy(): Promise<void> {
-    if (typeof fetch === 'undefined') return;
-    try {
-      const resp = await fetch('/api/proxy/status', {
-        headers: { Accept: 'application/json' },
-      });
-      if (!resp.ok) return;
-      const contentType = resp.headers.get('content-type') || '';
-      if (!contentType.includes('application/json')) return;
-      const status = (await resp.json()) as ProxyStatusResponse;
-      this.applyProxyStatus(status);
-    } catch {
-      // No proxy present — standard pure client-side mode
-    }
-  }
-
-  applyProxyStatus(status: ProxyStatusResponse): void {
-    if (typeof status.gemini === 'boolean') {
-      this._geminiProxyEnabled.set(status.gemini);
-    }
-    if (typeof status.googleMaps === 'boolean') {
-      this._googleMapsProxyEnabled.set(status.googleMaps);
-    }
   }
 
   setImageryProvider(provider: ImageryProviderType): void {

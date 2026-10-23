@@ -117,7 +117,7 @@ import { safeStorage } from '../../services/safe_storage';
           @if (configService.isGoogleMapsLocked()) {
             <div class="locked-notice" role="status">
               <mat-icon aria-hidden="true">lock</mat-icon>
-              <span>Google Maps API key is provided by the host/proxy and cannot be changed.</span>
+              <span>Google Maps API key is provided by the host environment and cannot be changed.</span>
             </div>
           } @else if (configService.locationService() === 'google') {
             <mat-form-field appearance="outline" class="full-width">
@@ -154,7 +154,7 @@ import { safeStorage } from '../../services/safe_storage';
           @if (configService.isGeminiLocked()) {
             <div class="locked-notice" role="status">
               <mat-icon aria-hidden="true">lock</mat-icon>
-              <span>Google Gemini API key is provided by the host/proxy and cannot be changed.</span>
+              <span>Google Gemini API key is provided by the host environment and cannot be changed.</span>
             </div>
           } @else if (configService.aiProvider() === 'gemini') {
             <mat-form-field appearance="outline" class="full-width">

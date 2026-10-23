@@ -75,36 +75,38 @@ describe('ConfigService', () => {
     expect(service.hasActiveAiKey()).toBe(true);
   });
 
-  it('locks Gemini and Google Maps when provided by the key-sharing proxy', () => {
-    const service = TestBed.inject(ConfigService);
+  it('locks Gemini and Google Maps when injected by the host environment (e.g. AI Studio)', () => {
+    const g = globalThis as Record<string, unknown>;
+    g['__STREETREADER_GEMINI_API_KEY__'] = 'AIzaHostGeminiKey';
+    g['__STREETREADER_GOOGLE_MAPS_API_KEY__'] = 'AIzaHostMapsKey';
 
-    service.setAiProvider('openai');
-    service.setLocationService('osm');
-    expect(service.aiProvider()).toBe('openai');
-    expect(service.locationService()).toBe('osm');
+    try {
+      const service = new ConfigService();
 
-    service.applyProxyStatus({ gemini: true, googleMaps: true });
+      expect(service.isGeminiLocked()).toBe(true);
+      expect(service.aiProvider()).toBe('gemini');
+      expect(service.geminiApiKey()).toBe('AIzaHostGeminiKey');
+      expect(service.hasActiveAiKey()).toBe(true);
 
-    expect(service.isGeminiLocked()).toBe(true);
-    expect(service.useGeminiProxy()).toBe(true);
-    expect(service.aiProvider()).toBe('gemini');
-    expect(service.hasActiveAiKey()).toBe(true);
+      // Attempting to change locked AI provider or Gemini key should be ignored
+      service.setAiProvider('openai');
+      service.setGeminiApiKey('user-override-attempt');
+      expect(service.aiProvider()).toBe('gemini');
+      expect(service.geminiApiKey()).toBe('AIzaHostGeminiKey');
 
-    // Attempting to change locked AI provider or Gemini key should be ignored
-    service.setAiProvider('openai');
-    service.setGeminiApiKey('user-override-attempt');
-    expect(service.aiProvider()).toBe('gemini');
-    expect(service.geminiApiKey()).toBe('');
+      expect(service.isGoogleMapsLocked()).toBe(true);
+      expect(service.locationService()).toBe('google');
+      expect(service.googleMapsApiKey()).toBe('AIzaHostMapsKey');
+      expect(service.hasActiveLocationConfig()).toBe(true);
 
-    expect(service.isGoogleMapsLocked()).toBe(true);
-    expect(service.useGoogleMapsProxy()).toBe(true);
-    expect(service.locationService()).toBe('google');
-    expect(service.hasActiveLocationConfig()).toBe(true);
-
-    // Attempting to change locked Location provider or Google Maps key should be ignored
-    service.setLocationService('osm');
-    service.setGoogleMapsApiKey('user-override-attempt');
-    expect(service.locationService()).toBe('google');
-    expect(service.googleMapsApiKey()).toBe('');
+      // Attempting to change locked Location provider or Google Maps key should be ignored
+      service.setLocationService('osm');
+      service.setGoogleMapsApiKey('user-override-attempt');
+      expect(service.locationService()).toBe('google');
+      expect(service.googleMapsApiKey()).toBe('AIzaHostMapsKey');
+    } finally {
+      delete g['__STREETREADER_GEMINI_API_KEY__'];
+      delete g['__STREETREADER_GOOGLE_MAPS_API_KEY__'];
+    }
   });
 });
