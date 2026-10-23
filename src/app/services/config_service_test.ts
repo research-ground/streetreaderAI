@@ -19,7 +19,6 @@ import {
   ConfigService,
   DEFAULT_GEMINI_MODEL_ID,
   DEFAULT_OPENAI_MODEL_ID,
-  DEFAULT_PANORAMAX_BASE_URL,
   DEFAULT_STARTING_ADDRESS,
 } from './config_service';
 import { safeStorage } from './safe_storage';
@@ -34,48 +33,21 @@ describe('ConfigService', () => {
     safeStorage.clear();
   });
 
-  it('defaults to panoramax, osm, and gemini when localStorage is empty', () => {
+  it('defaults to panoramax, osm, and gemini from built-in streetreaderai.conf defaults', () => {
     const service = TestBed.inject(ConfigService);
     expect(service.imageryProvider()).toBe('panoramax');
-    expect(service.panoramaxBaseUrl()).toBe(DEFAULT_PANORAMAX_BASE_URL);
     expect(service.locationService()).toBe('osm');
     expect(service.aiProvider()).toBe('gemini');
     expect(service.geminiModelId).toBe(DEFAULT_GEMINI_MODEL_ID);
     expect(service.openaiModelId).toBe(DEFAULT_OPENAI_MODEL_ID);
     expect(service.startingAddress()).toBe(DEFAULT_STARTING_ADDRESS);
     expect(service.hasActiveImageryConfig()).toBe(true);
+    expect(service.hasActiveLocationConfig()).toBe(true);
     expect(service.hasActiveAiKey()).toBe(false);
+    expect(service.validateRequiredKeys()).toContain('gemini_api_key');
   });
 
-  it('persists provider selections and API keys in localStorage', () => {
-    const service = TestBed.inject(ConfigService);
-
-    service.setImageryProvider('mapillary');
-    expect(service.imageryProvider()).toBe('mapillary');
-    expect(service.hasActiveImageryConfig()).toBe(false);
-
-    service.setMapillaryToken('  MLY|test-token-123  ');
-    expect(service.mapillaryToken()).toBe('MLY|test-token-123');
-    expect(localStorage.getItem('streetreader_mapillary_token')).toBe(
-      'MLY|test-token-123'
-    );
-    expect(service.hasActiveImageryConfig()).toBe(true);
-
-    service.setLocationService('google');
-    service.setGoogleMapsApiKey('AIzaGoogleKey');
-    expect(service.locationService()).toBe('google');
-    expect(service.googleMapsApiKey()).toBe('AIzaGoogleKey');
-
-    service.setGeminiApiKey('AIzaGeminiKey');
-    expect(service.hasActiveAiKey()).toBe(true);
-
-    service.setAiProvider('openai');
-    expect(service.hasActiveAiKey()).toBe(false);
-    service.setOpenaiApiKey('sk-test-openai');
-    expect(service.hasActiveAiKey()).toBe(true);
-  });
-
-  it('locks Gemini and Google Maps when injected by the host environment (e.g. AI Studio)', () => {
+  it('detects host environment keys (e.g. Google AI Studio) and satisfies required key validation', () => {
     const g = globalThis as Record<string, unknown>;
     g['__STREETREADER_GEMINI_API_KEY__'] = 'AIzaHostGeminiKey';
     g['__STREETREADER_GOOGLE_MAPS_API_KEY__'] = 'AIzaHostMapsKey';
@@ -88,42 +60,32 @@ describe('ConfigService', () => {
       expect(service.geminiApiKey()).toBe('AIzaHostGeminiKey');
       expect(service.hasActiveAiKey()).toBe(true);
 
-      // Attempting to change locked AI provider or Gemini key should be ignored
-      service.setAiProvider('openai');
-      service.setGeminiApiKey('user-override-attempt');
-      expect(service.aiProvider()).toBe('gemini');
-      expect(service.geminiApiKey()).toBe('AIzaHostGeminiKey');
-
       expect(service.isGoogleMapsLocked()).toBe(true);
       expect(service.locationService()).toBe('google');
       expect(service.googleMapsApiKey()).toBe('AIzaHostMapsKey');
       expect(service.hasActiveLocationConfig()).toBe(true);
 
-      // Attempting to change locked Location provider or Google Maps key should be ignored
-      service.setLocationService('osm');
-      service.setGoogleMapsApiKey('user-override-attempt');
-      expect(service.locationService()).toBe('google');
-      expect(service.googleMapsApiKey()).toBe('AIzaHostMapsKey');
+      expect(service.validateRequiredKeys()).toBeNull();
     } finally {
       delete g['__STREETREADER_GEMINI_API_KEY__'];
       delete g['__STREETREADER_GOOGLE_MAPS_API_KEY__'];
     }
   });
 
-  it('parses streetreaderai.conf sections including retrieval_type and image_format and validates required keys', () => {
+  it('parses streetreaderai.conf sections ([system], [keys], [imagery.*], [location.*], [ai.*]) and validates keys', () => {
     const service = TestBed.inject(ConfigService);
-    expect(service.validateRequiredKeys()).toContain('gemini_api_key');
 
     service.applyConfText(`
 [system]
 imagery_provider = custom_point
-location_provider = osm
-ai_provider = gemini
+location_provider = custom_loc
+ai_provider = custom_ai
 max_poi_items = 5
 
 [keys]
-gemini_api_key = AIzaTestGeminiKey
-custom_imagery_key = CustomKey123
+custom_ai_key = sk-custom-ai
+custom_imagery_key = CustomImgKey123
+custom_loc_key = CustomLocKey456
 
 [imagery.custom_point]
 retrieval_type = image
@@ -136,16 +98,61 @@ id_field = pano_id
 lat_field = location.lat
 lng_field = location.lng
 capture_time_field = date
+
+[location.custom_loc]
+requires_key = custom_loc_key
+geocode_url = https://example.com/geocode?q={address}&key={apiKey}
+reverse_geocode_url = https://example.com/rev?lat={lat}&lng={lng}&key={apiKey}
+autocomplete_url = https://example.com/auto?q={query}&key={apiKey}
+items_path = data.items
+lat_field = coords.lat
+lng_field = coords.lng
+address_field = label
+
+[ai.custom_ai]
+requires_key = custom_ai_key
+wire_format = openai
+model_id = gpt-5.6-terra
+endpoint_url = https://example.com/v1/chat/completions
     `);
 
     expect(service.imageryProvider()).toBe('custom_point');
+    expect(service.locationService()).toBe('custom_loc');
+    expect(service.aiProvider()).toBe('custom_ai');
     expect(service.maxPoiItems()).toBe(5);
     expect(service.validateRequiredKeys()).toBeNull();
 
-    const plugin = service.getImageryPlugin('custom_point');
-    expect(plugin).toBeTruthy();
-    expect(plugin?.retrievalType).toBe('image');
-    expect(plugin?.imageFormat).toBe('single');
-    expect(plugin?.idField).toEqual(['pano_id']);
+    const imgPlugin = service.getImageryPlugin('custom_point');
+    expect(imgPlugin?.retrievalType).toBe('image');
+    expect(imgPlugin?.imageFormat).toBe('single');
+    expect(imgPlugin?.idField).toEqual(['pano_id']);
+
+    const locPlugin = service.getLocationPlugin('custom_loc');
+    expect(locPlugin?.itemsPath).toBe('data.items');
+    expect(locPlugin?.latField).toEqual(['coords.lat']);
+
+    const aiPlugin = service.getAiPlugin('custom_ai');
+    expect(aiPlugin?.wireFormat).toBe('openai');
+    expect(aiPlugin?.modelId).toBe('gpt-5.6-terra');
+  });
+
+  it('reports missing keys when an active provider in streetreaderai.conf lacks its required key', () => {
+    const service = TestBed.inject(ConfigService);
+    service.applyConfText(`
+[system]
+imagery_provider = mapillary
+location_provider = google
+ai_provider = openai
+
+[keys]
+openai_api_key =
+mapillary_token =
+google_maps_api_key =
+    `);
+
+    const err = service.validateRequiredKeys();
+    expect(err).toContain('openai_api_key (required by [ai.openai])');
+    expect(err).toContain('mapillary_token (required by [imagery.mapillary])');
+    expect(err).toContain('google_maps_api_key (required by [location.google])');
   });
 });

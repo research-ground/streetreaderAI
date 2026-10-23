@@ -25,23 +25,6 @@ coverage/
 .jetskicli/
 CLAUDE.md
 
-# Legacy artifacts & local data
+# Local archives & configuration (contains API keys)
 *.zip
-data/
-.cache/
-server/
-tests/
-__pycache__/
-*.pyc
-.venv/
-.pytest_cache/
-.server_startup.log
-*.db
-*.db-wal
-*.db-shm
-
-# Local configuration file (contains API keys)
 streetreaderai.conf
-
-
-

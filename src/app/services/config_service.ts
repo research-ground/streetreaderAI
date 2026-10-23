@@ -168,14 +168,6 @@ endpoint_url = https://api.openai.com/v1/chat/completions
 `.trim();
 
 const STORAGE_KEYS = {
-  imageryProvider: 'streetreader_imagery_provider',
-  mapillaryToken: 'streetreader_mapillary_token',
-  panoramaxBaseUrl: 'streetreader_panoramax_base_url',
-  locationService: 'streetreader_location_service',
-  googleMapsApiKey: 'streetreader_google_maps_api_key',
-  aiProvider: 'streetreader_ai_provider',
-  geminiApiKey: 'streetreader_gemini_api_key',
-  openaiApiKey: 'streetreader_openai_api_key',
   startingAddress: 'streetreader_starting_address',
 } as const;
 
@@ -315,24 +307,13 @@ export class ConfigService {
     readInjectedEnv('MAPILLARY_TOKEN')
   );
 
-  private readonly _mapillaryToken = signal<string>(
-    this.loadString(STORAGE_KEYS.mapillaryToken, '')
-  );
+  private readonly _mapillaryToken = signal<string>('');
   private readonly _imageryProvider = signal<ImageryProviderType>('panoramax');
-  private readonly _panoramaxBaseUrl = signal<string>(
-    this.loadString(STORAGE_KEYS.panoramaxBaseUrl, DEFAULT_PANORAMAX_BASE_URL)
-  );
   private readonly _userLocationService = signal<LocationProviderType>('osm');
-  private readonly _googleMapsApiKey = signal<string>(
-    this.loadString(STORAGE_KEYS.googleMapsApiKey, '')
-  );
+  private readonly _googleMapsApiKey = signal<string>('');
   private readonly _userAiProvider = signal<AiProviderType>('gemini');
-  private readonly _geminiApiKey = signal<string>(
-    this.loadString(STORAGE_KEYS.geminiApiKey, '')
-  );
-  private readonly _openaiApiKey = signal<string>(
-    this.loadString(STORAGE_KEYS.openaiApiKey, '')
-  );
+  private readonly _geminiApiKey = signal<string>('');
+  private readonly _openaiApiKey = signal<string>('');
   private readonly _startingAddress = signal<string>(
     this.loadString(STORAGE_KEYS.startingAddress, DEFAULT_STARTING_ADDRESS)
   );
@@ -350,7 +331,6 @@ export class ConfigService {
   readonly mapillaryToken = computed<string>(
     () => this._envMapillaryToken() || this._mapillaryToken()
   );
-  readonly panoramaxBaseUrl = this._panoramaxBaseUrl.asReadonly();
 
   readonly locationService = computed<LocationProviderType>(() =>
     this.isGoogleMapsLocked() ? 'google' : this._userLocationService()
@@ -432,23 +412,14 @@ export class ConfigService {
 
     if (sys['imagery_provider']) {
       this._imageryProvider.set(sys['imagery_provider'].trim());
-    } else {
-      const savedImg = safeStorage.getItem(STORAGE_KEYS.imageryProvider);
-      if (savedImg) this._imageryProvider.set(savedImg);
     }
 
     if (sys['location_provider']) {
       this._userLocationService.set(sys['location_provider'].trim());
-    } else {
-      const savedLoc = safeStorage.getItem(STORAGE_KEYS.locationService);
-      if (savedLoc) this._userLocationService.set(savedLoc);
     }
 
     if (sys['ai_provider']) {
       this._userAiProvider.set(sys['ai_provider'].trim());
-    } else {
-      const savedAi = safeStorage.getItem(STORAGE_KEYS.aiProvider);
-      if (savedAi) this._userAiProvider.set(savedAi);
     }
 
     if (sys['starting_address'] && !safeStorage.getItem(STORAGE_KEYS.startingAddress)) {
@@ -462,6 +433,12 @@ export class ConfigService {
       }
     }
 
+    this.customKeys.clear();
+    this._geminiApiKey.set('');
+    this._openaiApiKey.set('');
+    this._mapillaryToken.set('');
+    this._googleMapsApiKey.set('');
+
     for (const [k, v] of Object.entries(keys)) {
       const trimmed = (v || '').trim();
       if (!trimmed) continue;
@@ -470,7 +447,7 @@ export class ConfigService {
         this._geminiApiKey.set(trimmed);
       } else if (k === 'openai_api_key') {
         this._openaiApiKey.set(trimmed);
-      } else if (k === 'mapillary_token') {
+      } else if (k === 'mapillary_token' || k === 'mapillary_access_token') {
         this._mapillaryToken.set(trimmed);
       } else if (k === 'google_maps_api_key') {
         this._googleMapsApiKey.set(trimmed);
@@ -623,55 +600,6 @@ export class ConfigService {
   private loadString(key: string, fallback: string): string {
     const val = safeStorage.getItem(key);
     return val !== null && val.trim() !== '' ? val.trim() : fallback;
-  }
-
-  setImageryProvider(provider: ImageryProviderType): void {
-    this._imageryProvider.set(provider);
-    safeStorage.setItem(STORAGE_KEYS.imageryProvider, provider);
-  }
-
-  setMapillaryToken(token: string): void {
-    const trimmed = token.trim();
-    this._mapillaryToken.set(trimmed);
-    safeStorage.setItem(STORAGE_KEYS.mapillaryToken, trimmed);
-  }
-
-  setPanoramaxBaseUrl(url: string): void {
-    const trimmed = url.trim().replace(/\/+$/, '') || DEFAULT_PANORAMAX_BASE_URL;
-    this._panoramaxBaseUrl.set(trimmed);
-    safeStorage.setItem(STORAGE_KEYS.panoramaxBaseUrl, trimmed);
-  }
-
-  setLocationService(service: LocationProviderType): void {
-    if (this.isGoogleMapsLocked()) return;
-    this._userLocationService.set(service);
-    safeStorage.setItem(STORAGE_KEYS.locationService, service);
-  }
-
-  setGoogleMapsApiKey(key: string): void {
-    if (this.isGoogleMapsLocked()) return;
-    const trimmed = key.trim();
-    this._googleMapsApiKey.set(trimmed);
-    safeStorage.setItem(STORAGE_KEYS.googleMapsApiKey, trimmed);
-  }
-
-  setAiProvider(provider: AiProviderType): void {
-    if (this.isGeminiLocked()) return;
-    this._userAiProvider.set(provider);
-    safeStorage.setItem(STORAGE_KEYS.aiProvider, provider);
-  }
-
-  setGeminiApiKey(key: string): void {
-    if (this.isGeminiLocked()) return;
-    const trimmed = key.trim();
-    this._geminiApiKey.set(trimmed);
-    safeStorage.setItem(STORAGE_KEYS.geminiApiKey, trimmed);
-  }
-
-  setOpenaiApiKey(key: string): void {
-    const trimmed = key.trim();
-    this._openaiApiKey.set(trimmed);
-    safeStorage.setItem(STORAGE_KEYS.openaiApiKey, trimmed);
   }
 
   setStartingAddress(address: string): void {
