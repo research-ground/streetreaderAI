@@ -1587,7 +1587,10 @@ export class RouteProviderService {
   private readonly brokenImageIds = new Set<string>();
   private readonly visitedImageIds = new Set<string>();
   private readonly activeSequences: string[] = [];
-  private readonly tileSnapshots = new Map<string, AreaSnapshot>();
+  private readonly tileSnapshots = new Map<
+    string,
+    { centerLat: number; centerLng: number; snap: AreaSnapshot }
+  >();
 
   resetState(): void {
     this.tileSnapshots.clear();
@@ -1605,14 +1608,25 @@ export class RouteProviderService {
   }
 
   private async snapshotAt(lat: number, lng: number): Promise<AreaSnapshot> {
+    const prov = this.imagery.providerName;
+    // Reuse any existing snapshot whose 350m tile covers (lat, lng) with >= 150m margin
+    for (const [key, entry] of this.tileSnapshots.entries()) {
+      if (
+        key.startsWith(`${prov}:`) &&
+        calculateDistance(lat, lng, entry.centerLat, entry.centerLng) <= 200.0
+      ) {
+        return entry.snap;
+      }
+    }
+
     const tileDeg = 0.004;
     const tLat = Number((Math.round(lat / tileDeg) * tileDeg).toFixed(5));
     const tLng = Number((Math.round(lng / tileDeg) * tileDeg).toFixed(5));
-    const tKey = `${this.imagery.providerName}:${tLat}:${tLng}`;
+    const tKey = `${prov}:${tLat}:${tLng}`;
 
     const existing = this.tileSnapshots.get(tKey);
     if (existing) {
-      return existing;
+      return existing.snap;
     }
 
     const cacheRadius = Math.max(this.p.snapshotRadiusM, 250.0);
@@ -1642,7 +1656,7 @@ export class RouteProviderService {
       const oldest = this.tileSnapshots.keys().next().value;
       if (oldest !== undefined) this.tileSnapshots.delete(oldest);
     }
-    this.tileSnapshots.set(tKey, snap);
+    this.tileSnapshots.set(tKey, { centerLat: tLat, centerLng: tLng, snap });
     return snap;
   }
 
@@ -1668,6 +1682,7 @@ export class RouteProviderService {
   private async resolveNodeAddress(
     place: NodePlace,
     links: Link[],
+    snap?: AreaSnapshot | null,
     geocodedAddress?: string | null
   ): Promise<string | null> {
     if (geocodedAddress) return geocodedAddress;
@@ -1676,6 +1691,23 @@ export class RouteProviderService {
       ...links.map((l) => l.streetName),
     ]);
     if (label) return label;
+    if (snap) {
+      let nearestName: string | null = null;
+      let nearestDist = Infinity;
+      for (const w of snap.roads.ways.values()) {
+        if (!w.name) continue;
+        for (const [wLat, wLng] of w.pts) {
+          const d = calculateDistance(place.lat, place.lng, wLat, wLng);
+          if (d < nearestDist) {
+            nearestDist = d;
+            nearestName = w.name;
+          }
+        }
+      }
+      if (nearestName && nearestDist <= 100.0) {
+        return nearestName;
+      }
+    }
     return this.location.reverseGeocode(place.lat, place.lng);
   }
 
@@ -1882,6 +1914,7 @@ export class RouteProviderService {
     const resolvedAddress = await this.resolveNodeAddress(
       place,
       links,
+      snap,
       geocodedAddress
     );
 

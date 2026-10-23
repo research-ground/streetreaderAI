@@ -246,21 +246,33 @@ export class LocationProviderService {
   }
 
   private async osmAutocomplete(query: string): Promise<AutocompleteItem[]> {
+    const norm = query.trim().toLowerCase();
+    if (norm.length < 3) return [];
+    const cacheKey = `nominatim:auto:${DEFAULT_NOMINATIM_BASE_URL}:${norm}`;
+    const cached = metadataCache.get(cacheKey) as AutocompleteItem[] | undefined;
+    if (cached) {
+      queryAudit.recordCacheHit('nominatim');
+      return cached;
+    }
+
     const url = new URL(`${DEFAULT_NOMINATIM_BASE_URL}/search`);
     url.searchParams.set('q', query);
     url.searchParams.set('format', 'json');
     url.searchParams.set('limit', '5');
     try {
+      queryAudit.recordExternal('nominatim_auto', norm);
       const resp = await fetch(url.toString(), {
         headers: { Accept: 'application/json' },
       });
       if (!resp.ok) return [];
       const data = await resp.json();
       if (Array.isArray(data)) {
-        return data.map((p: Record<string, unknown>) => ({
+        const items = data.map((p: Record<string, unknown>) => ({
           description: String(p['display_name'] ?? ''),
           placeId: String(p['place_id'] ?? ''),
         }));
+        metadataCache.put(cacheKey, items);
+        return items;
       }
     } catch {
       // Ignore autocomplete errors

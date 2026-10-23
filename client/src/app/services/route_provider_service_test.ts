@@ -14,14 +14,27 @@
  limitations under the License.
  */
 
-import { LocationMetadata } from './imagery_provider_service';
-import { OsmWayElement } from './road_data_service';
+import { TestBed } from '@angular/core/testing';
+import { vi } from 'vitest';
+import { clearAllClientCaches, queryAudit } from './client_cache';
+import {
+  ImageryProviderService,
+  LocationMetadata,
+} from './imagery_provider_service';
+import { LocationProviderService } from './location_provider_service';
+import {
+  extractPoisFromOsmElements,
+  osmPoiTileCache,
+  OsmWayElement,
+  RoadDataService,
+} from './road_data_service';
 import {
   AreaSnapshot,
   normStreet,
   pickSeed,
   placeNode,
   RoadNetwork,
+  RouteProviderService,
 } from './route_provider_service';
 
 describe('5-Step RouteProvider Engine (Client-Side)', () => {
@@ -98,6 +111,11 @@ describe('5-Step RouteProvider Engine (Client-Side)', () => {
     },
   ];
 
+  beforeEach(() => {
+    clearAllClientCaches();
+    osmPoiTileCache.clear();
+  });
+
   it('normalizes street names and strips leading house numbers', () => {
     expect(normStreet('601 N 34th St.')).toBe('north 34th street');
     expect(normStreet('Fremont Ave N')).toBe('fremont avenue north');
@@ -142,5 +160,117 @@ describe('5-Step RouteProvider Engine (Client-Side)', () => {
     const seed = await pickSeed(snap, 47.649, -122.3505, '601 N 34th St');
     expect(seed).toBeTruthy();
     expect(seed?.place.image).toBeTruthy();
+  });
+
+  it('extracts node and building way POIs from OSM map.json elements and serves them from tile cache without extra HTTP calls', async () => {
+    const rawElements: Record<string, unknown>[] = [
+      { type: 'node', id: 10, lat: 47.6491, lon: -122.3508 },
+      { type: 'node', id: 11, lat: 47.6493, lon: -122.3506 },
+      {
+        type: 'node',
+        id: 20,
+        lat: 47.64915,
+        lon: -122.3505,
+        tags: { name: 'Moment Coffee', amenity: 'cafe' },
+      },
+      {
+        type: 'way',
+        id: 30,
+        nodes: [10, 11],
+        tags: { name: 'PCC Community Markets', shop: 'supermarket' },
+      },
+      {
+        type: 'way',
+        id: 40,
+        nodes: [10, 11],
+        tags: { name: 'N 34th St', highway: 'secondary' },
+      },
+    ];
+
+    const extracted = extractPoisFromOsmElements(rawElements);
+    expect(extracted.length).toBe(2);
+    expect(extracted.map((p) => p.name)).toEqual([
+      'Moment Coffee',
+      'PCC Community Markets',
+    ]);
+
+    // Populate the tile POI cache as OsmMapApiRoadSource does when loading road geometry
+    osmPoiTileCache.put('tile1', {
+      minLat: 47.645,
+      minLng: -122.355,
+      maxLat: 47.653,
+      maxLng: -122.345,
+      pois: extracted,
+    });
+
+    TestBed.configureTestingModule({});
+    const locService = TestBed.inject(LocationProviderService);
+    const res = await locService.getNearbyPlaces({
+      lat: 47.64917,
+      lng: -122.35046,
+      radius: 100,
+      heading: 270,
+    });
+
+    expect(res.places.length).toBe(2);
+    expect(res.places[0].name).toBe('Moment Coffee');
+    expect(res.places[0].relativePosition.depth).toBe('FRONT');
+    // Zero external osm_nearby calls because the road tile cache covered it!
+    expect(queryAudit.snapshot().external_calls['osm_nearby'] ?? 0).toBe(0);
+    expect(queryAudit.snapshot().cache_hits['osm_nearby']).toBeGreaterThanOrEqual(1);
+  });
+
+  it('reuses the loaded OSM road tile snapshot across getPanoView, getLocalGraph, and adjacent movements', async () => {
+    const fetchWaysSpy = vi
+      .fn()
+      .mockResolvedValue(sampleWays);
+
+    TestBed.configureTestingModule({
+      providers: [
+        {
+          provide: RoadDataService,
+          useValue: { fetchWaysForTile: fetchWaysSpy },
+        },
+        {
+          provide: ImageryProviderService,
+          useValue: {
+            providerName: 'panoramax',
+            getMetadataBbox: vi.fn().mockResolvedValue(sequenceFrames),
+            getSequence: vi.fn().mockResolvedValue(sequenceFrames),
+            getImage: vi.fn().mockResolvedValue({
+              image: 'base64jpeg',
+              imageId: 'f1',
+              actualHeading: 90,
+            }),
+          },
+        },
+      ],
+    });
+
+    const routeProvider = TestBed.inject(RouteProviderService);
+
+    // 1. Initial landing at (47.6490, -122.3510)
+    const view1 = await routeProvider.getPanoView({
+      coordinates: { latitude: 47.649, longitude: -122.351 },
+      heading: 90,
+    });
+    expect(view1.canonicalNodeId).toBe('osm_1');
+    expect(fetchWaysSpy).toHaveBeenCalledTimes(1);
+
+    // 2. RadarViewComponent requests local graph nearby
+    const graph = await routeProvider.getLocalGraph(47.6495, -122.3505, 90);
+    expect(graph.nodes.length).toBeGreaterThan(0);
+    expect(fetchWaysSpy).toHaveBeenCalledTimes(1);
+
+    // 3. Stepping along the street block to the next node
+    const nextLink = view1.links![0];
+    const view2 = await routeProvider.getPanoView({
+      canonicalNodeId: nextLink.canonicalNodeId,
+      coordinates: nextLink.coordinates,
+      heading: nextLink.heading,
+    });
+    expect(view2.status).toBe('ok');
+    // Still only 1 OSM road tile fetch for the entire neighborhood session!
+    expect(fetchWaysSpy).toHaveBeenCalledTimes(1);
   });
 });

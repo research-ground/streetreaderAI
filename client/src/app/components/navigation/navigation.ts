@@ -68,10 +68,10 @@ export class NavigationComponent {
 
     this.autocompleteState$ = this.searchControl.valueChanges.pipe(
       startWith(''),
-      debounceTime(300),
+      debounceTime(500),
       distinctUntilChanged(),
       switchMap((value) => {
-        if (!value) return of(idle);
+        if (!value || value.trim().length < 3) return of(idle);
         return concat(
           of<AutocompleteState>({ status: 'loading', items: [] }),
           this.apiService.autocompleteAddress(value).pipe(
