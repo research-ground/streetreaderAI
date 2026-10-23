@@ -45,8 +45,9 @@ Welcome! As an AI development assistant (Gemini, Antigravity, Jetski, etc.) work
 
 ---
 
-## 4. Workspace Hygiene
+## 4. Workspace Hygiene & Licensing
 
+* **Apache 2.0 Copyright Header**: Every code file (`.ts`, `.html`, `.css`, `.scss`) must start with the standard Google Apache 2.0 license block (`Copyright 2026 Google LLC`). Verify this whenever creating new code files.
 * **Keep It Clean**: Do not leave temporary, draft, or testing files at the root or in project directories after finishing a task. Use `<appDataDir>/brain/<conversation-id>/scratch/` if temporary storage is needed.
 * **Comments & Docstrings**: Maintain documentation integrity. Preserve existing comments and docstrings unless they are explicitly incorrect or obsolete.
 
