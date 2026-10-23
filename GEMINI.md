@@ -8,7 +8,6 @@ Welcome! As an AI development assistant (Gemini, Antigravity, Jetski, etc.) work
 
 ### 🌿 Branch Workflow
 1. **Primary Branch**: `main` is the primary development branch for the pure client-side Angular SPA.
-2. **Legacy Client-Server Branch**: The `client-server` branch preserves the earlier Python Flask backend + Angular client checkpoint.
 
 ---
 

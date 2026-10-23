@@ -15,13 +15,18 @@
  -->
 
 @if (pois().length > 0) {
-  <mat-list>
+  <mat-list class="compact-poi-list">
     @for (poi of pois(); track poi.name) {
-      <mat-list-item>
-        <mat-icon matListItemIcon>{{ getIcon(poi.types) }}</mat-icon>
-        <div matListItemTitle>{{ poi.name }}</div>
-        <div matListItemLine>{{ poi.vicinity }}</div>
-        <div matListItemLine class="position-tag">{{ getRelativePosition(poi) }}</div>
+      <mat-list-item class="compact-poi-item">
+        <mat-icon matListItemIcon class="poi-icon">{{ getIcon(poi.types) }}</mat-icon>
+        <div matListItemTitle class="poi-title">{{ poi.name }}</div>
+        <div matListItemLine class="poi-meta">
+          @if (poi.vicinity) {
+            <span class="poi-vicinity">{{ poi.vicinity }}</span>
+            <span class="poi-sep">&middot;</span>
+          }
+          <span class="position-tag">{{ getRelativePosition(poi) }}</span>
+        </div>
       </mat-list-item>
     }
   </mat-list>

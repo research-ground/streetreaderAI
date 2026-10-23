@@ -18,8 +18,6 @@ While the original research prototype in the paper was built on Google Street Vi
 * **Geocoding & Places**: OpenStreetMap Nominatim & Overpass (with optional Google Maps Platform support).
 * **Multimodal AI**: Google Gemini (`gemini-3.8-flash`) or OpenAI (`gpt-5.6-terra`).
 
-*(Note: The earlier Python Flask backend + Angular client version is preserved on the [`client-server`](https://github.com/research-ground/streetreaderAI/tree/client-server) branch.)*
-
 ### Cite this work
 ```bibtex
 @inproceedings{Froehlich_2025,
