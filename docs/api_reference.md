@@ -11,7 +11,7 @@ StreetReaderAI executes as a **100% client-side Angular SPA**. All navigation, r
 * [`RouteProviderService`](../src/app/services/route_provider_service.ts) — 5-step intersection + sequence-slice routing solver.
 * [`RoadDataService`](../src/app/services/road_data_service.ts) — OpenStreetMap v0.6 `/api/0.6/map.json` road network and POI extractor (with Overpass fallback).
 * [`ImageryProviderService`](../src/app/services/imagery_provider_service.ts) — Declarative street imagery client configured by `[imagery.<name>]` in `streetreaderai.conf` (`retrieval_type = sequence | image`, `image_format = 360 | single`).
-* [`PanoramaCropService`](../src/app/services/panorama_crop_service.ts) — HTML5 `<canvas>` 360° equirectangular-to-rectilinear projection (`1440×1080`).
+* [`PanoramaCropService`](../src/app/services/panorama_crop_service.ts) — HTML5 `<canvas>` 360° equirectangular-to-rectilinear projection (`960×720`, `120°` FOV, with decoded `Uint8ClampedArray` pixel buffer caching).
 * [`LocationProviderService`](../src/app/services/location_provider_service.ts) — Declarative geocoding, reverse geocoding, autocomplete, and nearby POI client configured by `[location.<name>]` in `streetreaderai.conf`.
 * [`AiProviderService`](../src/app/services/ai_provider_service.ts) — Declarative multimodal scene description and visual Q&A client configured by `[ai.<name>]` in `streetreaderai.conf` (Google Gemini `gemini-3.8-flash` or OpenAI-compatible `gpt-5.6-terra`).
 * [`ConfigService`](../src/app/services/config_service.ts) — Loads `streetreaderai.conf` (falling back to `streetreaderai.conf.example`), parses `[system]`, `[keys]`, and declarative provider sections (`[imagery.*]`, `[location.*]`, `[ai.*]`), detects host environment keys (`process.env.GEMINI_API_KEY`), and validates required keys on launch (`validateRequiredKeys()`).
@@ -20,10 +20,10 @@ StreetReaderAI executes as a **100% client-side Angular SPA**. All navigation, r
 
 ## 1. Location & Places (`LocationProviderService` / `ApiService`)
 
-### `getNearbyPlaces(lat, lng, radius?, heading?)`
+### `getNearbyPlaces({ lat, lng, radius?, heading? })`
 Finds nearby Points of Interest (POIs) relative to a specific location and computes observer-relative positions (`LEFT`/`RIGHT`, `FRONT`/`BEHIND`).
-* When **OpenStreetMap** is selected, POIs (`node` and building `way` elements with `name` tags) are extracted directly from the already-cached OpenStreetMap v0.6 road tile (`osmPoiTileCache`) with zero extra network calls whenever the user is inside the loaded road tile.
-* When **Google Maps** is selected, calls Places API v1 (`places:searchNearby`).
+* When **OpenStreetMap** (`[location.osm]`) is selected, POIs (`node` and building `way` elements with `name` tags) are extracted directly from the already-cached OpenStreetMap v0.6 road tile (`osmPoiTileCache`) with zero extra network calls whenever the user is inside the loaded road tile.
+* When **Google Maps** (`[location.google]`) is selected, calls Places API v1 (`places:searchNearby`).
 
 **Response Interface (`GetNearbyPlacesResponse`):**
 ```json
@@ -50,7 +50,7 @@ Finds nearby Points of Interest (POIs) relative to a specific location and compu
 
 ---
 
-### `getAutocompleteSuggestions(query, sessionToken?)`
+### `autocompleteAddress(query, sessionToken?)` / `LocationProviderService.autocomplete(query, sessionToken?)`
 Provides place and address suggestions.
 * **OpenStreetMap**: Throttled (minimum 3 characters, 500ms debounce in UI) and cached in `metadataCache` against Nominatim `/search`.
 * **Google Maps**: Calls Places API v1 (`places:autocomplete`).
@@ -71,10 +71,10 @@ Provides place and address suggestions.
 
 ## 2. Navigation & Imagery (`RouteProviderService` / `ApiService`)
 
-### `generatePanoramaView(options)`
+### `getView(params)` / `RouteProviderService.getPanoView(params)`
 The primary navigation method. Locates a position (by `canonicalNodeId` + `coordinates`, by `imageId`, by `coordinates`, or by `address`) and returns the rendered rectilinear viewport (`base64` JPEG), the resolved street/intersection address, and the adjacent navigation links computed for that node.
 
-**Request Interface (`GeneratePanoramaOptions`):**
+**Request Parameters:**
 ```json
 {
   "canonicalNodeId": "seq_3888112701332191",
@@ -86,7 +86,7 @@ The primary navigation method. Locates a position (by `canonicalNodeId` + `coord
 }
 ```
 
-**Response Interface (`NavigateResponse`):**
+**Response Interface (`GetViewResponse`):**
 ```json
 {
   "imageId": "3888112701332191",
@@ -172,7 +172,7 @@ Answers specific questions about the current street view image and optionally de
 
 ## 4. Diagnostics & Graph Inspection
 
-### `getLocalGraph(lat, lng, radiusMeters?)`
+### `getLocalGraph({ lat, lng, radiusMeters? })`
 Returns the solved local navigation graph (unified `osm_<id>` intersections and `seq_<imageId>` block waypoints) within `radiusMeters` (default `80`) for the `RadarViewComponent` mini-map and debugging.
 
 **Response Interface (`LocalGraphResponse`):**

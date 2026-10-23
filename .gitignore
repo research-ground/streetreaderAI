@@ -28,3 +28,4 @@ CLAUDE.md
 # Local archives & configuration (contains API keys)
 *.zip
 streetreaderai.conf
+streetreaderai.*.conf

@@ -38,12 +38,12 @@ StreetReaderAI never projects panoramic imagery onto OpenStreetMap road centerli
 
 ## In-Browser Equirectangular Panorama Projection
 
-* **Full-Resolution Source Spheres (`ImageryProviderService`)**:
-  * **Panoramax** (`https://api.panoramax.xyz/api`): Queries STAC `/search` for 360° equirectangular collections and downloads `assets.hd` (falling back to `assets.sd`) with `crossOrigin = 'anonymous'`.
+* **360° Source Spheres (`ImageryProviderService`)**:
+  * **Panoramax** (`https://api.panoramax.xyz/api`): Queries STAC `/search` for 360° equirectangular collections and downloads `assets.sd.href` (falling back to `assets.hd.href`) via `fetch()`.
   * **Mapillary** (`https://graph.mapillary.com`): Queries `thumb_original_url` (falling back to `thumb_2048_url`) for the viewed node.
 * **Rectilinear Viewport Rendering (`PanoramaCropService`)**:
-  * Projects the 360° equirectangular sphere into a `1440×1080` (`90°` horizontal FOV) rectilinear JPEG viewport in-browser using HTML5 `<canvas>` spherical inverse gnomonic projection (`cropPanoramaToBase64`).
-  * Rotating in place (`renderView`) re-projects the cached `HTMLImageElement` in memory with zero network calls.
+  * Projects the 360° equirectangular sphere into a `960×720` (`120°` horizontal FOV) rectilinear JPEG viewport in-browser using HTML5 `<canvas>` spherical inverse gnomonic projection (`cropPanorama`).
+  * Rotating in place (`renderView`) re-projects the cached `DecodedPanorama` (`Uint8ClampedArray` pixel buffer) in memory with zero network calls.
 
 ---
 
@@ -75,5 +75,6 @@ The frontend displays a permanent, non-interactive (`aria-hidden="true"`, keyboa
 
 ## Testing (`make test`)
 
-* [`src/app/services/route_provider_service_test.ts`](../src/app/services/route_provider_service_test.ts): Offline unit tests for the 5-step sequence graph solver, OSM v0.6 POI extraction (`extractPoisFromOsmElements`), and zero-network-call tile reuse.
-* [`src/app/services/config_service_test.ts`](../src/app/services/config_service_test.ts): Unit tests for provider persistence, API key validation, and key-sharing proxy lock behavior.
+* [`src/app/services/route_provider_service_test.ts`](../src/app/services/route_provider_service_test.ts): Offline unit tests for the 5-step sequence graph solver, point-sampled block solving (`retrieval_type = image`), OSM v0.6 POI extraction (`extractPoisFromOsmElements`), and zero-network-call tile reuse.
+* [`src/app/services/provider_plugins_test.ts`](../src/app/services/provider_plugins_test.ts): Unit tests for declarative `.conf` plugins across `ImageryProviderService` (`sequence`/`360` and `image`/`single`), `LocationProviderService`, and `AiProviderService`.
+* [`src/app/services/config_service_test.ts`](../src/app/services/config_service_test.ts): Unit tests for `streetreaderai.conf` parsing, startup key validation (`validateRequiredKeys()`), and AI Studio host environment key detection.
