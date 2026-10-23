@@ -231,6 +231,17 @@ import { safeStorage } from '../../services/safe_storage';
           </mat-select>
         </mat-form-field>
 
+        <mat-form-field appearance="outline" class="full-width">
+          <mat-label>Maximum nearby POIs shown</mat-label>
+          <mat-select [value]="stateService.maxPoiItems()" (selectionChange)="stateService.setMaxPoiItems($event.value)">
+            <mat-option [value]="1">1</mat-option>
+            <mat-option [value]="3">3 (Default)</mat-option>
+            <mat-option [value]="5">5</mat-option>
+            <mat-option [value]="10">10</mat-option>
+            <mat-option [value]="20">20</mat-option>
+          </mat-select>
+        </mat-form-field>
+
         <div class="setting-item">
           <span class="setting-label">Allow movement commands in chat</span>
           <mat-slide-toggle

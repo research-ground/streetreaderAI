@@ -50,6 +50,7 @@ export interface AppState {
   isLoading: boolean;
   modifierKey: ModifierKey;
   orientationDisplayMode: OrientationDisplayMode;
+  maxPoiItems: number;
   chatControlsApp: boolean;
   autoDescribe: boolean;
   showWelcome: boolean;
@@ -64,6 +65,7 @@ export class StateService {
   private readonly WELCOME_KEY = 'streetreader_show_welcome';
   private readonly MODIFIER_KEY = 'streetreader_modifier_key';
   private readonly ORIENTATION_MODE_KEY = 'streetreader_orientation_mode';
+  private readonly MAX_POI_ITEMS_KEY = 'streetreader_max_poi_items';
   private readonly CHAT_CONTROLS_KEY = 'streetreader_chat_controls';
   private readonly AUTO_DESCRIBE_KEY = 'streetreader_auto_describe';
   private readonly CURTAIN_KEY = 'streetreader_curtain_enabled';
@@ -80,6 +82,7 @@ export class StateService {
     isLoading: false,
     modifierKey: (safeStorage.getItem(this.MODIFIER_KEY) as ModifierKey) || 'alt',
     orientationDisplayMode: (safeStorage.getItem(this.ORIENTATION_MODE_KEY) as OrientationDisplayMode) || 'both',
+    maxPoiItems: parseInt(safeStorage.getItem(this.MAX_POI_ITEMS_KEY) || '3', 10) || 3,
     chatControlsApp: safeStorage.getItem(this.CHAT_CONTROLS_KEY) !== 'false', // Default to true
     autoDescribe: safeStorage.getItem(this.AUTO_DESCRIBE_KEY) !== 'false',
     showWelcome: safeStorage.getItem(this.WELCOME_KEY) !== 'false',
@@ -96,6 +99,7 @@ export class StateService {
   readonly currentImage = computed(() => this.appState().currentImage);
   readonly modifierKey = computed(() => this.appState().modifierKey);
   readonly orientationDisplayMode = computed(() => this.appState().orientationDisplayMode);
+  readonly maxPoiItems = computed(() => this.appState().maxPoiItems);
   readonly chatControlsApp = computed(() => this.appState().chatControlsApp);
   readonly autoDescribe = computed(() => this.appState().autoDescribe);
   readonly showWelcome = computed(() => this.appState().showWelcome);
@@ -115,6 +119,12 @@ export class StateService {
   setOrientationDisplayMode(mode: OrientationDisplayMode) {
     safeStorage.setItem(this.ORIENTATION_MODE_KEY, mode);
     this.appState.update(s => ({ ...s, orientationDisplayMode: mode }));
+  }
+
+  setMaxPoiItems(limit: number) {
+    const clamped = Math.max(1, Math.min(20, Math.round(limit) || 3));
+    safeStorage.setItem(this.MAX_POI_ITEMS_KEY, clamped.toString());
+    this.appState.update(s => ({ ...s, maxPoiItems: clamped }));
   }
 
   setChatControlsApp(enabled: boolean) {

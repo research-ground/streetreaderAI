@@ -30,7 +30,9 @@ import { NearbyPlace } from '../../services/api_service';
 })
 export class PoiListComponent {
   private stateService = inject(StateService);
-  protected pois = computed(() => this.stateService.state().nearbyPOIs);
+  protected pois = computed(() =>
+    this.stateService.state().nearbyPOIs.slice(0, this.stateService.maxPoiItems())
+  );
 
   protected getRelativePosition(poi: NearbyPlace): string {
     if (!poi.relativePosition) return 'unknown position';

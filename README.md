@@ -4,6 +4,8 @@ StreetReaderAI is an AI-powered accessibility tool designed for blind and low-vi
 
 > **Research Prototype & Feedback**: StreetReaderAI is an experimental research prototype and will likely have bugs. Please [file bugs on GitHub](https://github.com/research-ground/streetreaderAI/issues) or send feedback and questions to [streetreaderai-team@google.com](mailto:streetreaderai-team@google.com).
 
+![StreetReaderAI Main Interface](docs/screenshot.png)
+
 ## Research Paper & Citation
 
 StreetReaderAI is based on the research presented at ACM UIST 2025:

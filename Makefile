@@ -31,5 +31,5 @@ check: test
 
 make-for-aistudio:
 	@echo "==> Creating clean archive streetreaderai-aistudio.zip for Google AI Studio..."
-	git archive --format=zip --output=streetreaderai-aistudio.zip HEAD
+	git archive --format=zip --output=streetreaderai-aistudio.zip HEAD -- . ':!docs/screenshot.png'
 	@ls -lh streetreaderai-aistudio.zip
