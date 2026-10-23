@@ -117,10 +117,10 @@ The primary navigation method. Locates a position (by `canonicalNodeId` + `coord
 
 ---
 
-### `renderView(options)`
+### `renderView(params)`
 Pure viewport rendering method. Re-crops an already-known 360° panorama (`imageId`) in-browser via `PanoramaCropService` at a new `heading` and `pitch` without re-solving road geometry or recomputing links.
 
-**Request Interface (`RenderViewOptions`):**
+**Request Parameters:**
 ```json
 {
   "imageId": "3888112701332191",
