@@ -15,7 +15,7 @@
  */
 
 import { Injectable } from '@angular/core';
-import { queryAudit, roadCache, singleflight } from './client_cache';
+import { LruCache, queryAudit, roadCache, singleflight } from './client_cache';
 
 export interface OsmGeomPoint {
   lat: number;
@@ -28,6 +28,22 @@ export interface OsmWayElement {
   nodes: number[];
   tags?: Record<string, string>;
   geometry: OsmGeomPoint[];
+}
+
+export interface OsmPoiItem {
+  lat: number;
+  lng: number;
+  name: string;
+  vicinity: string;
+  types: string[];
+}
+
+export interface TilePoiEntry {
+  minLat: number;
+  minLng: number;
+  maxLat: number;
+  maxLng: number;
+  pois: OsmPoiItem[];
 }
 
 export interface RoadDataSource {
@@ -50,6 +66,19 @@ export const DEFAULT_OVERPASS_ENDPOINTS = [
   'https://overpass.private.coffee/api/interpreter',
 ];
 
+const POI_TAG_KEYS = [
+  'amenity',
+  'shop',
+  'tourism',
+  'leisure',
+  'office',
+  'craft',
+  'healthcare',
+  'historic',
+] as const;
+
+export const osmPoiTileCache = new LruCache<TilePoiEntry>(64);
+
 function bboxCacheKey(
   minLat: number,
   minLng: number,
@@ -57,6 +86,80 @@ function bboxCacheKey(
   maxLng: number
 ): string {
   return `${minLat.toFixed(5)},${minLng.toFixed(5)},${maxLat.toFixed(5)},${maxLng.toFixed(5)}`;
+}
+
+/**
+ * Extracts named POIs (`node` and building/area `way` elements) from an
+ * OpenStreetMap `/api/0.6/map.json` elements array.
+ */
+export function extractPoisFromOsmElements(
+  elements: Record<string, unknown>[],
+  nodesMap?: Map<number, [number, number]>
+): OsmPoiItem[] {
+  const nodes = nodesMap ?? new Map<number, [number, number]>();
+  if (!nodesMap) {
+    for (const el of elements) {
+      if (
+        el['type'] === 'node' &&
+        typeof el['id'] === 'number' &&
+        typeof el['lat'] === 'number' &&
+        typeof el['lon'] === 'number'
+      ) {
+        nodes.set(el['id'], [el['lat'], el['lon']]);
+      }
+    }
+  }
+
+  const pois: OsmPoiItem[] = [];
+  const seenNames = new Set<string>();
+
+  for (const el of elements) {
+    const tags = (el['tags'] as Record<string, string>) || {};
+    const name = tags['name']?.trim();
+    if (!name || tags['highway']) continue;
+
+    let category = '';
+    for (const k of POI_TAG_KEYS) {
+      if (tags[k]) {
+        category = tags[k].replace(/_/g, ' ');
+        break;
+      }
+    }
+    if (!category) continue;
+
+    let lat: number | undefined;
+    let lng: number | undefined;
+    if (
+      el['type'] === 'node' &&
+      typeof el['lat'] === 'number' &&
+      typeof el['lon'] === 'number'
+    ) {
+      lat = el['lat'];
+      lng = el['lon'];
+    } else if (el['type'] === 'way' && Array.isArray(el['nodes'])) {
+      const pts = (el['nodes'] as number[])
+        .map((nid) => nodes.get(nid))
+        .filter((p): p is [number, number] => Boolean(p));
+      if (pts.length > 0) {
+        lat = pts.reduce((s, p) => s + p[0], 0) / pts.length;
+        lng = pts.reduce((s, p) => s + p[1], 0) / pts.length;
+      }
+    }
+
+    if (lat === undefined || lng === undefined) continue;
+    const dedupKey = `${name.toLowerCase()}:${lat.toFixed(3)}:${lng.toFixed(3)}`;
+    if (seenNames.has(dedupKey)) continue;
+    seenNames.add(dedupKey);
+
+    pois.push({
+      lat,
+      lng,
+      name,
+      vicinity: category,
+      types: [category],
+    });
+  }
+  return pois;
 }
 
 /**
@@ -104,6 +207,16 @@ export class OsmMapApiRoadSource implements RoadDataSource {
           nodes.set(el['id'], [el['lat'], el['lon']]);
         }
       }
+
+      // Also extract and cache all POIs in this tile so nearby POI queries are instant!
+      const pois = extractPoisFromOsmElements(elements, nodes);
+      osmPoiTileCache.put(key, {
+        minLat,
+        minLng,
+        maxLat,
+        maxLng,
+        pois,
+      });
 
       const ways: OsmWayElement[] = [];
       for (const el of elements) {

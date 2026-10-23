@@ -46,6 +46,10 @@ export class LruCache<V> {
     return this.store.size;
   }
 
+  values(): IterableIterator<V> {
+    return this.store.values();
+  }
+
   clear(): void {
     this.store.clear();
   }

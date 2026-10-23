@@ -28,7 +28,13 @@ import {
   DEFAULT_GOOGLE_MAPS_BASE_URL,
   DEFAULT_NOMINATIM_BASE_URL,
 } from './config_service';
-import { DEFAULT_OVERPASS_ENDPOINTS } from './road_data_service';
+import {
+  DEFAULT_OVERPASS_ENDPOINTS,
+  extractPoisFromOsmElements,
+  OSM_MAP_API_URL,
+  OsmPoiItem,
+  osmPoiTileCache,
+} from './road_data_service';
 
 export interface GeocodeResult {
   lat: number;
@@ -266,66 +272,105 @@ export class LocationProviderService {
     lat: number,
     lng: number,
     radius: number
-  ): Promise<
-    Array<{
-      lat: number;
-      lng: number;
-      name: string;
-      vicinity: string;
-      types: string[];
-    }>
-  > {
+  ): Promise<OsmPoiItem[]> {
     const cacheKey = `osm:nearby:${lat.toFixed(4)}:${lng.toFixed(4)}:${radius}`;
-    const cached = metadataCache.get(cacheKey) as
-      | Array<{
-          lat: number;
-          lng: number;
-          name: string;
-          vicinity: string;
-          types: string[];
-        }>
-      | undefined;
+    const cached = metadataCache.get(cacheKey) as OsmPoiItem[] | undefined;
     if (cached) {
       queryAudit.recordCacheHit('osm_nearby');
       return cached;
     }
 
-    const query = `[out:json][timeout:12];node(around:${radius},${lat},${lng})["name"];out 20;`;
-    const endpoint = DEFAULT_OVERPASS_ENDPOINTS[0];
+    const dLat = radius / M_PER_DEG_LAT;
+    const dLng =
+      radius / (M_PER_DEG_LAT * Math.max(Math.cos((lat * Math.PI) / 180.0), 0.1));
+
+    // 1. Check if an already-loaded OSM v0.6 road tile covers this radius
+    for (const tile of osmPoiTileCache.values()) {
+      if (
+        lat - dLat >= tile.minLat &&
+        lat + dLat <= tile.maxLat &&
+        lng - dLng >= tile.minLng &&
+        lng + dLng <= tile.maxLng
+      ) {
+        queryAudit.recordCacheHit('osm_nearby');
+        const nearby = tile.pois
+          .map((p) => ({
+            poi: p,
+            dist: calculateDistance(lat, lng, p.lat, p.lng),
+          }))
+          .filter((item) => item.dist <= radius)
+          .sort((a, b) => a.dist - b.dist)
+          .slice(0, 20)
+          .map((item) => item.poi);
+        metadataCache.put(cacheKey, nearby);
+        return nearby;
+      }
+    }
+
+    // 2. Fetch directly from the official OpenStreetMap v0.6 /api/0.6/map.json endpoint
+    const minLat = lat - dLat * 1.25;
+    const maxLat = lat + dLat * 1.25;
+    const minLng = lng - dLng * 1.25;
+    const maxLng = lng + dLng * 1.25;
     try {
-      const resp = await fetch(endpoint, {
-        method: 'POST',
-        body: new URLSearchParams({ data: query }),
+      const url = new URL(OSM_MAP_API_URL);
+      url.searchParams.set('bbox', `${minLng},${minLat},${maxLng},${maxLat}`);
+      queryAudit.recordExternal(
+        'osm_nearby',
+        `${lat.toFixed(4)},${lng.toFixed(4)}:${radius}`
+      );
+      const resp = await fetch(url.toString(), {
+        headers: { Accept: 'application/json' },
       });
       if (resp.ok) {
-        const data = await resp.json();
-        const elements = Array.isArray(data?.elements) ? data.elements : [];
-        const results: Array<{
-          lat: number;
-          lng: number;
-          name: string;
-          vicinity: string;
-          types: string[];
-        }> = [];
-        for (const el of elements) {
-          if (typeof el.lat === 'number' && typeof el.lon === 'number') {
-            const tags = el.tags || {};
-            const category =
-              tags.amenity || tags.shop || tags.tourism || tags.leisure || '';
-            results.push({
-              lat: Number(el.lat),
-              lng: Number(el.lon),
-              name: String(tags.name || 'Unknown Place'),
-              vicinity: String(category),
-              types: category ? [String(category)] : [],
-            });
-          }
-        }
-        metadataCache.put(cacheKey, results);
-        return results;
+        const payload = await resp.json();
+        const elements: Record<string, unknown>[] = Array.isArray(
+          payload?.elements
+        )
+          ? payload.elements
+          : [];
+        const allPois = extractPoisFromOsmElements(elements);
+        const nearby = allPois
+          .map((p) => ({
+            poi: p,
+            dist: calculateDistance(lat, lng, p.lat, p.lng),
+          }))
+          .filter((item) => item.dist <= radius)
+          .sort((a, b) => a.dist - b.dist)
+          .slice(0, 20)
+          .map((item) => item.poi);
+        metadataCache.put(cacheKey, nearby);
+        return nearby;
       }
     } catch {
-      // Ignore Overpass POI error
+      // Fall back to Overpass mirrors below
+    }
+
+    // 3. Fallback to Overpass API mirrors
+    const query = `[out:json][timeout:12];node(around:${radius},${lat},${lng})["name"];out 20;`;
+    for (const endpoint of DEFAULT_OVERPASS_ENDPOINTS) {
+      try {
+        const resp = await fetch(endpoint, {
+          method: 'POST',
+          body: new URLSearchParams({ data: query }),
+        });
+        if (!resp.ok) continue;
+        const data = await resp.json();
+        const elements = Array.isArray(data?.elements) ? data.elements : [];
+        const results = extractPoisFromOsmElements(elements)
+          .map((p) => ({
+            poi: p,
+            dist: calculateDistance(lat, lng, p.lat, p.lng),
+          }))
+          .filter((item) => item.dist <= radius)
+          .sort((a, b) => a.dist - b.dist)
+          .slice(0, 20)
+          .map((item) => item.poi);
+        metadataCache.put(cacheKey, results);
+        return results;
+      } catch {
+        // Try next Overpass mirror
+      }
     }
     return [];
   }
