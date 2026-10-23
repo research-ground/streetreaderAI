@@ -107,7 +107,30 @@ On first launch (or whenever no active AI API key is configured), StreetReaderAI
 
 You can update any of these options later via the **Settings** button or by pressing `Shift + /` (`?` for hotkeys).
 
-### 4. Building & Running Tests
+### 4. Running in Google AI Studio (100% Free-Tier Configuration)
+
+StreetReaderAI is compatible with **Google AI Studio** and can run end-to-end on a **100% free plan** with zero paid APIs or credit card required:
+
+#### Free-Tier Configuration Matrix
+| Capability | Provider to Select | Cost / Key Requirement |
+| :--- | :--- | :--- |
+| **1. Street Imagery** | **Panoramax** (Default) | **Free** — Open federated 360° imagery; no API key required |
+| **2. Road Network & Routing** | **OpenStreetMap v0.6 API** (Default) | **Free** — Public OSM road & intersection data; no API key required |
+| **3. Geocoding & Nearby POIs** | **OpenStreetMap (Nominatim & Tile POIs)** (Default) | **Free** — Uses Nominatim & cached OSM road tiles; no API key required |
+| **4. Vision-Language Model (VLM)** | **Google Gemini (`gemini-3.8-flash`)** (Default) | **Free Tier** — Provided automatically by AI Studio (`GEMINI_API_KEY` / `API_KEY`) or via a free key from [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
+
+#### How to Import / Deploy in Google AI Studio
+1. Open [Google AI Studio](https://aistudio.google.com/) and go to **Build** (or **Apps** $\rightarrow$ **Create new app**).
+2. Import the **`client/`** folder from this repository (which contains `package.json`, `angular.json`, `metadata.json`, and `src/`):
+   * **Option A (Upload Folder / Zip)**: Upload the contents of the `client/` directory into a new AI Studio app.
+   * **Option B (GitHub Import)**: Connect your GitHub repository in AI Studio and point the app root to `client/`.
+3. **Automatic Key Injection**:
+   * When running inside the AI Studio preview environment, StreetReaderAI automatically detects the injected `process.env.GEMINI_API_KEY` (or `process.env.API_KEY`), pre-configures Google Gemini (`gemini-3.8-flash`), and uses an in-memory fallback (`safeStorage`) when running inside AI Studio's sandboxed iframe.
+   * Keep **Street Imagery Provider** set to **Panoramax** and **Location & Geocoding Provider** set to **OpenStreetMap** in the First-Run dialog so that no Mapillary or Google Maps billing keys are needed.
+4. **Sharing / Deploying from AI Studio**:
+   * Click **Share** in AI Studio to share the applet link with other users (each viewer uses their own free AI Studio Gemini quota), or click **Deploy to Cloud Run** in the top-right corner of AI Studio for a standalone hosted URL.
+
+### 5. Building & Running Tests
 
 ```bash
 # Run unit tests (Vitest + Angular TestBed)
