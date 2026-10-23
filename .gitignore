@@ -40,3 +40,8 @@ __pycache__/
 *.db-wal
 *.db-shm
 
+# Local configuration file (contains API keys)
+streetreaderai.conf
+
+
+

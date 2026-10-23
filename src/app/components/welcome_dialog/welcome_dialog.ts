@@ -17,10 +17,8 @@
 import {
   AfterViewInit,
   Component,
-  computed,
   ElementRef,
   inject,
-  signal,
   ViewChild,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
@@ -29,19 +27,12 @@ import { MatDialogModule, MatDialogRef } from '@angular/material/dialog';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatFormFieldModule } from '@angular/material/form-field';
-import { MatInputModule } from '@angular/material/input';
 import { MatSelectModule } from '@angular/material/select';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { StateService } from '../../services/state_service';
 import { SpeechOutputService } from '../../services/speech_output_service';
 import { LoggingService } from '../../services/logging_service';
-import {
-  AiProviderType,
-  ConfigService,
-  ImageryProviderType,
-  LocationProviderType,
-} from '../../services/config_service';
-import { RouteProviderService } from '../../services/route_provider_service';
+import { ConfigService } from '../../services/config_service';
 
 @Component({
   selector: 'app-first-run-dialog',
@@ -53,7 +44,6 @@ import { RouteProviderService } from '../../services/route_provider_service';
     MatButtonModule,
     MatIconModule,
     MatFormFieldModule,
-    MatInputModule,
     MatSelectModule,
     MatSlideToggleModule,
   ],
@@ -63,9 +53,8 @@ import { RouteProviderService } from '../../services/route_provider_service';
 
       <mat-dialog-content #scrollTarget>
         <p class="intro-text">
-          Choose your initial configuration below to begin exploring. Because scene description is
-          core to StreetReaderAI, an AI vision API key is required to continue. You can change any
-          of these options later in Settings (<kbd>Shift</kbd>+<kbd>/</kbd>).
+          Choose your initial accessibility and control preferences below to begin exploring.
+          You can change any of these options later in Settings (<kbd>Shift</kbd>+<kbd>/</kbd>).
         </p>
 
         <p class="prototype-note">
@@ -74,80 +63,8 @@ import { RouteProviderService } from '../../services/route_provider_service';
           or send feedback to <a href="mailto:streetreaderai-team@google.com">streetreaderai-team&#64;google.com</a>.
         </p>
 
-        <!-- 1. AI Vision Provider & Key (Required) -->
-        <section class="setup-section" aria-labelledby="setup-ai-heading">
-          <h3 id="setup-ai-heading">1. AI Scene Description (Required)</h3>
-          <div class="option-group">
-            <mat-form-field appearance="outline" class="full-width">
-              <mat-label>AI Vision Provider</mat-label>
-              <mat-select
-                [value]="configService.aiProvider()"
-                [disabled]="configService.isGeminiLocked()"
-                (selectionChange)="onAiProviderChange($event.value)">
-                <mat-option value="gemini">Google Gemini ({{ configService.geminiModelId }})</mat-option>
-                <mat-option value="openai">OpenAI ({{ configService.openaiModelId }})</mat-option>
-              </mat-select>
-            </mat-form-field>
-
-            @if (configService.isGeminiLocked()) {
-              <div class="locked-notice" role="status">
-                <mat-icon aria-hidden="true">lock</mat-icon>
-                <span>Google Gemini API key is provided by the host environment and cannot be changed.</span>
-              </div>
-            } @else if (configService.aiProvider() === 'gemini') {
-              <mat-form-field appearance="outline" class="full-width">
-                <mat-label>Gemini API Key (Required)</mat-label>
-                <input
-                  matInput
-                  required
-                  [type]="showGeminiKey() ? 'text' : 'password'"
-                  [ngModel]="configService.geminiApiKey()"
-                  (ngModelChange)="configService.setGeminiApiKey($event)"
-                  placeholder="AIza..."
-                  autocomplete="off" />
-                <button
-                  mat-icon-button
-                  matSuffix
-                  type="button"
-                  (click)="showGeminiKey.set(!showGeminiKey())"
-                  [attr.aria-label]="showGeminiKey() ? 'Hide Gemini API key' : 'Show Gemini API key'">
-                  <mat-icon>{{ showGeminiKey() ? 'visibility_off' : 'visibility' }}</mat-icon>
-                </button>
-              </mat-form-field>
-            } @else {
-              <mat-form-field appearance="outline" class="full-width">
-                <mat-label>OpenAI API Key (Required)</mat-label>
-                <input
-                  matInput
-                  required
-                  [type]="showOpenaiKey() ? 'text' : 'password'"
-                  [ngModel]="configService.openaiApiKey()"
-                  (ngModelChange)="configService.setOpenaiApiKey($event)"
-                  placeholder="sk-..."
-                  autocomplete="off" />
-                <button
-                  mat-icon-button
-                  matSuffix
-                  type="button"
-                  (click)="showOpenaiKey.set(!showOpenaiKey())"
-                  [attr.aria-label]="showOpenaiKey() ? 'Hide OpenAI API key' : 'Show OpenAI API key'">
-                  <mat-icon>{{ showOpenaiKey() ? 'visibility_off' : 'visibility' }}</mat-icon>
-                </button>
-              </mat-form-field>
-            }
-
-            @if (!configService.hasActiveAiKey()) {
-              <div class="validation-banner" role="alert">
-                <mat-icon aria-hidden="true">key</mat-icon>
-                <span>Please enter your {{ configService.aiProvider() === 'openai' ? 'OpenAI' : 'Gemini' }} API key to enable scene descriptions and continue.</span>
-              </div>
-            }
-          </div>
-        </section>
-
-        <!-- 2. Accessibility & Control Options -->
         <section class="setup-section" aria-labelledby="setup-controls-heading">
-          <h3 id="setup-controls-heading">2. Accessibility &amp; Controls</h3>
+          <h3 id="setup-controls-heading">Accessibility &amp; Controls</h3>
           <div class="option-group">
             <div class="option-row">
               <div class="option-description">
@@ -211,82 +128,6 @@ import { RouteProviderService } from '../../services/route_provider_service';
             </mat-form-field>
           </div>
         </section>
-
-        <!-- 3. Street Imagery & Location Providers -->
-        <section class="setup-section" aria-labelledby="setup-data-heading">
-          <h3 id="setup-data-heading">3. Street Imagery &amp; Location Providers</h3>
-          <div class="option-group">
-            <mat-form-field appearance="outline" class="full-width">
-              <mat-label>Street Imagery Provider</mat-label>
-              <mat-select
-                [value]="configService.imageryProvider()"
-                (selectionChange)="onImageryProviderChange($event.value)">
-                <mat-option value="panoramax">Panoramax (Open — No Key Required)</mat-option>
-                <mat-option value="mapillary">Mapillary (Requires Client Token)</mat-option>
-              </mat-select>
-            </mat-form-field>
-
-            @if (configService.imageryProvider() === 'mapillary') {
-              <mat-form-field appearance="outline" class="full-width">
-                <mat-label>Mapillary Client Token (Required for Mapillary)</mat-label>
-                <input
-                  matInput
-                  required
-                  [type]="showMapillaryToken() ? 'text' : 'password'"
-                  [ngModel]="configService.mapillaryToken()"
-                  (ngModelChange)="configService.setMapillaryToken($event)"
-                  placeholder="MLY|..."
-                  autocomplete="off" />
-                <button
-                  mat-icon-button
-                  matSuffix
-                  type="button"
-                  (click)="showMapillaryToken.set(!showMapillaryToken())"
-                  [attr.aria-label]="showMapillaryToken() ? 'Hide Mapillary token' : 'Show Mapillary token'">
-                  <mat-icon>{{ showMapillaryToken() ? 'visibility_off' : 'visibility' }}</mat-icon>
-                </button>
-              </mat-form-field>
-            }
-
-            <mat-form-field appearance="outline" class="full-width">
-              <mat-label>Location &amp; Geocoding Provider</mat-label>
-              <mat-select
-                [value]="configService.locationService()"
-                [disabled]="configService.isGoogleMapsLocked()"
-                (selectionChange)="onLocationServiceChange($event.value)">
-                <mat-option value="osm">OpenStreetMap (Nominatim &amp; Overpass — No Key Required)</mat-option>
-                <mat-option value="google">Google Maps Platform (Requires API Key)</mat-option>
-              </mat-select>
-            </mat-form-field>
-
-            @if (configService.isGoogleMapsLocked()) {
-              <div class="locked-notice" role="status">
-                <mat-icon aria-hidden="true">lock</mat-icon>
-                <span>Google Maps API key is provided by the host environment and cannot be changed.</span>
-              </div>
-            } @else if (configService.locationService() === 'google') {
-              <mat-form-field appearance="outline" class="full-width">
-                <mat-label>Google Maps API Key (Required for Google Maps)</mat-label>
-                <input
-                  matInput
-                  required
-                  [type]="showGoogleKey() ? 'text' : 'password'"
-                  [ngModel]="configService.googleMapsApiKey()"
-                  (ngModelChange)="configService.setGoogleMapsApiKey($event)"
-                  placeholder="AIza..."
-                  autocomplete="off" />
-                <button
-                  mat-icon-button
-                  matSuffix
-                  type="button"
-                  (click)="showGoogleKey.set(!showGoogleKey())"
-                  [attr.aria-label]="showGoogleKey() ? 'Hide Google Maps API key' : 'Show Google Maps API key'">
-                  <mat-icon>{{ showGoogleKey() ? 'visibility_off' : 'visibility' }}</mat-icon>
-                </button>
-              </mat-form-field>
-            }
-          </div>
-        </section>
       </mat-dialog-content>
 
       <mat-dialog-actions align="end">
@@ -294,7 +135,6 @@ import { RouteProviderService } from '../../services/route_provider_service';
           mat-flat-button
           color="primary"
           class="start-button"
-          [disabled]="!canProceed()"
           (click)="completeSetup()">
           Start Exploring
         </button>
@@ -365,35 +205,6 @@ import { RouteProviderService } from '../../services/route_provider_service';
       line-height: 1.35;
     }
     .full-width { width: 100%; margin-top: 8px; }
-    .locked-notice {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 10px 12px;
-      margin-bottom: 8px;
-      background: #e8f0fe;
-      color: #174ea6;
-      border-radius: 6px;
-      font-size: 13px;
-    }
-    .locked-notice mat-icon,
-    .validation-banner mat-icon {
-      font-size: 18px;
-      width: 18px;
-      height: 18px;
-      flex-shrink: 0;
-    }
-    .validation-banner {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 10px 12px;
-      background: #fff4e5;
-      color: #8a4b00;
-      border: 1px solid #ffd599;
-      border-radius: 6px;
-      font-size: 13px;
-    }
     .start-button {
       min-width: 180px;
       padding: 8px 20px;
@@ -417,35 +228,20 @@ export class WelcomeDialogComponent implements AfterViewInit {
   protected readonly stateService = inject(StateService);
   protected readonly configService = inject(ConfigService);
   protected readonly speechOutputService = inject(SpeechOutputService);
-  private readonly routeProvider = inject(RouteProviderService);
   private readonly loggingService = inject(LoggingService);
   private readonly dialogRef = inject(MatDialogRef<WelcomeDialogComponent>);
-
-  protected readonly showGeminiKey = signal(false);
-  protected readonly showOpenaiKey = signal(false);
-  protected readonly showMapillaryToken = signal(false);
-  protected readonly showGoogleKey = signal(false);
-
-  protected readonly canProceed = computed(
-    () =>
-      this.configService.hasActiveAiKey() &&
-      this.configService.hasActiveImageryConfig() &&
-      this.configService.hasActiveLocationConfig()
-  );
 
   @ViewChild('scrollTarget') private readonly scrollTarget!: ElementRef;
 
   constructor() {
     this.dialogRef.keydownEvents().subscribe((event) => {
-      if (event.key === 'Escape' && this.canProceed()) {
+      if (event.key === 'Escape') {
         this.completeSetup();
       }
     });
 
     this.dialogRef.backdropClick().subscribe(() => {
-      if (this.canProceed()) {
-        this.completeSetup();
-      }
+      this.completeSetup();
     });
   }
 
@@ -457,24 +253,7 @@ export class WelcomeDialogComponent implements AfterViewInit {
     }, 0);
   }
 
-  protected onAiProviderChange(provider: AiProviderType) {
-    this.configService.setAiProvider(provider);
-  }
-
-  protected onImageryProviderChange(provider: ImageryProviderType) {
-    this.configService.setImageryProvider(provider);
-    this.routeProvider.resetState();
-  }
-
-  protected onLocationServiceChange(service: LocationProviderType) {
-    this.configService.setLocationService(service);
-  }
-
   protected completeSetup() {
-    if (!this.canProceed()) {
-      return;
-    }
-
     this.loggingService.logEvent({
       type: 'FIRST_RUN_SETUP_COMPLETED',
       aiProvider: this.configService.aiProvider(),

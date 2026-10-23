@@ -10,11 +10,11 @@ StreetReaderAI executes as a **100% client-side Angular SPA**. All navigation, r
 
 * [`RouteProviderService`](../src/app/services/route_provider_service.ts) — 5-step intersection + sequence-slice routing solver.
 * [`RoadDataService`](../src/app/services/road_data_service.ts) — OpenStreetMap v0.6 `/api/0.6/map.json` road network and POI extractor (with Overpass fallback).
-* [`ImageryProviderService`](../src/app/services/imagery_provider_service.ts) — Panoramax STAC API and Mapillary Graph API v4 client.
+* [`ImageryProviderService`](../src/app/services/imagery_provider_service.ts) — Declarative street imagery client configured by `[imagery.<name>]` in `streetreaderai.conf` (`retrieval_type = sequence | image`, `image_format = 360 | single`).
 * [`PanoramaCropService`](../src/app/services/panorama_crop_service.ts) — HTML5 `<canvas>` 360° equirectangular-to-rectilinear projection (`1440×1080`).
-* [`LocationProviderService`](../src/app/services/location_provider_service.ts) — Geocoding, reverse geocoding, autocomplete, and nearby POI search (OpenStreetMap Nominatim/Overpass or Google Maps Platform).
-* [`AiProviderService`](../src/app/services/ai_provider_service.ts) — Multimodal scene description and visual Q&A via Google Gemini (`gemini-3.8-flash`) or OpenAI (`gpt-5.6-terra`).
-* [`ConfigService`](../src/app/services/config_service.ts) — Runtime provider configuration, `safeStorage` persistence, and host environment key detection.
+* [`LocationProviderService`](../src/app/services/location_provider_service.ts) — Declarative geocoding, reverse geocoding, autocomplete, and nearby POI client configured by `[location.<name>]` in `streetreaderai.conf`.
+* [`AiProviderService`](../src/app/services/ai_provider_service.ts) — Declarative multimodal scene description and visual Q&A client configured by `[ai.<name>]` in `streetreaderai.conf` (Google Gemini `gemini-3.8-flash` or OpenAI-compatible `gpt-5.6-terra`).
+* [`ConfigService`](../src/app/services/config_service.ts) — Loads `streetreaderai.conf` (falling back to `streetreaderai.conf.example`), parses `[system]`, `[keys]`, and declarative provider sections (`[imagery.*]`, `[location.*]`, `[ai.*]`), detects host environment keys (`process.env.GEMINI_API_KEY`), and validates required keys on launch (`validateRequiredKeys()`).
 
 ---
 

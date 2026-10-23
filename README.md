@@ -74,55 +74,79 @@ While the original research prototype in the paper was built on Google Street Vi
 * **Node.js** (v18+) and **npm**
 * An API key for [Google Gemini](https://aistudio.google.com/app/apikey) or [OpenAI](https://platform.openai.com/)
 
-### 2. Install & Run
+### 2. Install, Configure & Run
 
 ```bash
-# Install frontend dependencies
+# Install frontend dependencies and create streetreaderai.conf from streetreaderai.conf.example
 make setup
+```
 
+Open [`streetreaderai.conf`](streetreaderai.conf.example) in any text editor and add your AI API key under `[keys]` (plus any optional keys if you switch imagery or location providers under `[system]`):
+
+```ini
+[system]
+imagery_provider = panoramax
+location_provider = osm
+ai_provider = gemini
+starting_address = 601 N 34th St, Seattle, WA
+max_poi_items = 20
+
+[keys]
+gemini_api_key = YOUR_GEMINI_API_KEY
+openai_api_key =
+mapillary_access_token =
+google_maps_api_key =
+```
+
+> **Note**: `streetreaderai.conf` is listed in `.gitignore` so your API keys are never committed to version control. If a required key for the active providers in `[system]` is missing on launch, StreetReaderAI immediately displays a **Configuration Error** dialog identifying which key to add in `streetreaderai.conf`.
+
+Then start the development server:
+
+```bash
 # Launch the Angular development server on http://localhost:4200
 make start
 ```
 
 Open **<http://localhost:4200>** in your browser.
 
-### 3. First-Run Setup & Configuration
+### 3. Declarative Provider Plugins (`streetreaderai.conf`)
 
-On first launch (or whenever no active AI API key is configured), StreetReaderAI presents the **Welcome & Setup** dialog where you select your initial preferences:
+All backend services (Street Imagery, Location/Geocoding, and AI Vision) are configured declaratively in `streetreaderai.conf` using URL templates and JSON dot-path field mappings—no code changes are required to switch or add providers:
 
-1. **AI Scene Description (Required)**:
-   * Because visual scene description is core to StreetReaderAI, you must configure an AI vision API key before entering the app (unless a key is already provided by a host environment or key-sharing proxy).
-   * Choose **Google Gemini** (`gemini-3.8-flash`) or **OpenAI** (`gpt-5.6-terra`) and enter your API key.
-2. **Accessibility & Controls**:
-   * **Self-voicing speech output**: Read descriptions, street announcements, and chat answers aloud using browser TTS (turn off if using an external screen reader).
-   * **Automatically generate scene descriptions**: Describe each new panorama automatically upon arrival.
-   * **Allow movement commands in chat**: Let natural-language commands (e.g., *"turn left"*, *"go forward"*) move or rotate the view.
-   * **Global Hotkey Modifier**: Choose `Alt` (default), `Alt + Shift` (recommended for screen readers), `Ctrl`, `Ctrl + Shift`, `Command`, or `Command + Shift`.
-   * **Direction format**: Choose cardinal directions, degrees, or both.
-3. **Street Imagery & Location Data Sources**:
-   * **Street Imagery Provider**:
-     * **Panoramax** (default) — Open, federated 360° street-level imagery requiring **zero API keys**.
-     * **Mapillary** — Requires a free Client Token from the [Mapillary Developer Portal](https://www.mapillary.com/dashboard/developers).
-   * **Location & Geocoding Provider**:
-     * **OpenStreetMap** (default) — Uses Nominatim and the cached OSM v0.6 road tile with **zero API keys**.
-     * **Google Maps Platform** — Uses Google Geocoding and Places APIs (requires a Google Maps API Key).
+* **`[imagery.<name>]`**:
+  * `retrieval_type = sequence | image`:
+    * `sequence`: Queries a bounding box (`bbox_url`) and expands multi-image camera trajectories (`sequence_url`) along street blocks (e.g., **Panoramax**, **Mapillary**).
+    * `image`: Queries single-point metadata (`point_url`) at intersections and samples points along candidate blocks so the 5-step sequence routing solver validates street connectivity identically to sequence-based providers.
+  * `image_format = 360 | single`:
+    * `360`: Fetches a full 360° equirectangular panorama (`field_image_url`) and projects rectilinear viewports in-browser via HTML5 `<canvas>` (`PanoramaCropService`).
+    * `single`: Fetches a directional rectilinear image (`image_url`) for the requested `heading` and `pitch`.
+* **`[location.<name>]`**: Configures forward geocoding (`geocode_url`), reverse geocoding (`reverse_url`), address autocomplete (`autocomplete_url`), and nearby POI mode (`poi_mode = osm_tile | google_places`).
+* **`[ai.<name>]`**: Configures the multimodal vision endpoint (`api_Style = gemini | openai_compatible`, `model`, and `endpoint_url`).
 
-You can update any of these options later via the **Settings** button or by pressing `Shift + /` (`?` for hotkeys).
+### 4. Accessibility & Controls (Welcome & Settings Dialogs)
 
-### 4. Running in Google AI Studio (100% Free-Tier Configuration)
+On first launch, StreetReaderAI presents the **Welcome** dialog where you can customize your accessibility and interaction preferences (also accessible anytime via the **Settings** button or `Alt + S`):
+
+* **Self-voicing speech output**: Read descriptions, street announcements, and chat answers aloud using browser TTS (turn off if using an external screen reader).
+* **Automatically generate scene descriptions**: Describe each new view automatically upon arrival.
+* **Allow movement commands in chat**: Let natural-language commands (e.g., *"turn left"*, *"go forward"*) move or rotate the view.
+* **Global Hotkey Modifier**: Choose `Alt` (default), `Alt + Shift` (recommended for screen readers), `Ctrl`, `Ctrl + Shift`, `Command`, or `Command + Shift`.
+* **Direction format**: Choose cardinal directions, degrees, or both.
+
+### 5. Running in Google AI Studio (100% Free-Tier Configuration)
 
 StreetReaderAI is compatible with **Google AI Studio** and can run end-to-end on a **100% free plan** with zero paid APIs or credit card required:
 
 #### Free-Tier Configuration Matrix
-| Capability | Provider to Select | Cost / Key Requirement |
+| Capability | Default Provider in `streetreaderai.conf.example` | Cost / Key Requirement |
 | :--- | :--- | :--- |
-| **1. Street Imagery** | **Panoramax** (Default) | **Free** — Open federated 360° imagery; no API key required |
-| **2. Road Network & Routing** | **OpenStreetMap v0.6 API** (Default) | **Free** — Public OSM road & intersection data; no API key required |
-| **3. Geocoding & Nearby POIs** | **OpenStreetMap (Nominatim & Tile POIs)** (Default) | **Free** — Uses Nominatim & cached OSM road tiles; no API key required |
-| **4. Vision-Language Model (VLM)** | **Google Gemini (`gemini-3.8-flash`)** (Default) | **Free Tier** — Provided automatically by AI Studio (`GEMINI_API_KEY` / `API_KEY`) or via a free key from [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
+| **1. Street Imagery** | **`panoramax`** (`retrieval_type = sequence`, `image_format = 360`) | **Free** — Open federated 360° imagery; no API key required |
+| **2. Road Network & Routing** | **OpenStreetMap v0.6 API** | **Free** — Public OSM road & intersection data; no API key required |
+| **3. Geocoding & Nearby POIs** | **`osm`** (Nominatim & Cached OSM Tile POIs) | **Free** — Uses Nominatim & cached OSM road tiles; no API key required |
+| **4. Vision-Language Model (VLM)** | **`gemini`** (`gemini-3.8-flash`) | **Free Tier** — Provided automatically by AI Studio (`GEMINI_API_KEY` / `API_KEY`) or via a free key from [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
 
 #### How to Import / Deploy in Google AI Studio
-1. Generate a clean zip archive of the repository's tracked files (excluding `node_modules/` and `.git/`):
+1. Generate a clean zip archive of the repository's tracked files (excluding `node_modules/`, `.git/`, and your private `streetreaderai.conf`):
    ```bash
    make make-for-aistudio
    ```
@@ -130,13 +154,13 @@ StreetReaderAI is compatible with **Google AI Studio** and can run end-to-end on
 2. Open [Google AI Studio](https://aistudio.google.com/) (**Build**) and start a blank project by typing `"blank project"` in the prompt.
 3. When the project opens, **stop the agent** immediately (it will begin generating template files even though you requested a blank project).
 4. Add/attach `streetreaderai-aistudio.zip` to the chat prompt and prompt the agent: `"import files"`.
-5. **Automatic Key Injection**:
-   * When running inside the AI Studio preview environment, StreetReaderAI automatically detects the injected `process.env.GEMINI_API_KEY` (or `process.env.API_KEY`), pre-configures Google Gemini (`gemini-3.8-flash`), and uses an in-memory fallback (`safeStorage`) when running inside AI Studio's sandboxed iframe.
-   * Keep **Street Imagery Provider** set to **Panoramax** and **Location & Geocoding Provider** set to **OpenStreetMap** in the First-Run dialog so that no Mapillary or Google Maps billing keys are needed.
+5. **Automatic Configuration & Key Injection**:
+   * When `streetreaderai.conf` is not present, StreetReaderAI automatically loads `streetreaderai.conf.example` (which defaults to `panoramax`, `osm`, and `gemini`) and detects AI Studio's injected `process.env.GEMINI_API_KEY` (or `process.env.API_KEY`).
+   * Anyone who spawns a copy of the project in AI Studio can also edit `streetreaderai.conf.example` directly in the AI Studio code editor to customize providers, URLs, or keys.
 6. **Sharing / Deploying from AI Studio**:
    * Click **Share** in AI Studio to share the applet link with other users (each viewer uses their own free AI Studio Gemini quota), or click **Deploy to Cloud Run** in the top-right corner of AI Studio for a standalone hosted URL.
 
-### 5. Building & Running Tests
+### 6. Building & Running Tests
 
 ```bash
 # Run unit tests (Vitest + Angular TestBed)

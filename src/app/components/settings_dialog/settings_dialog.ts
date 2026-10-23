@@ -14,7 +14,7 @@
  limitations under the License.
  */
 
-import { Component, inject, signal } from '@angular/core';
+import { Component, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { MatDialogModule, MatDialogRef } from '@angular/material/dialog';
 import { MatButtonModule } from '@angular/material/button';
@@ -29,14 +29,7 @@ import { FormsModule } from '@angular/forms';
 import { StateService } from '../../services/state_service';
 import { SpeechOutputService } from '../../services/speech_output_service';
 import { DescriptionCacheService } from '../../services/description_cache_service';
-import {
-  AiProviderType,
-  ConfigService,
-  ImageryProviderType,
-  LocationProviderType,
-} from '../../services/config_service';
-import { RouteProviderService } from '../../services/route_provider_service';
-import { NavigationService } from '../../services/navigation_service';
+import { ConfigService } from '../../services/config_service';
 import { clearAllClientCaches } from '../../services/client_cache';
 import { safeStorage } from '../../services/safe_storage';
 
@@ -59,155 +52,6 @@ import { safeStorage } from '../../services/safe_storage';
   template: `
     <h2 mat-dialog-title>Settings</h2>
     <mat-dialog-content>
-      <div class="settings-section">
-        <h3>Data Sources &amp; API Keys</h3>
-        <div class="setting-group">
-          <mat-form-field appearance="outline" class="full-width">
-            <mat-label>Street Imagery Provider</mat-label>
-            <mat-select
-              [value]="configService.imageryProvider()"
-              (selectionChange)="onImageryProviderChange($event.value)">
-              <mat-option value="panoramax">Panoramax (Open — No Key Required)</mat-option>
-              <mat-option value="mapillary">Mapillary (Requires Client Token)</mat-option>
-            </mat-select>
-          </mat-form-field>
-
-          @if (configService.imageryProvider() === 'mapillary') {
-            <mat-form-field appearance="outline" class="full-width">
-              <mat-label>Mapillary Client Token</mat-label>
-              <input
-                matInput
-                [type]="showMapillaryToken() ? 'text' : 'password'"
-                [ngModel]="configService.mapillaryToken()"
-                (ngModelChange)="onMapillaryTokenChange($event)"
-                placeholder="MLY|..."
-                autocomplete="off" />
-              <button
-                mat-icon-button
-                matSuffix
-                type="button"
-                (click)="showMapillaryToken.set(!showMapillaryToken())"
-                [attr.aria-label]="showMapillaryToken() ? 'Hide Mapillary token' : 'Show Mapillary token'">
-                <mat-icon>{{ showMapillaryToken() ? 'visibility_off' : 'visibility' }}</mat-icon>
-              </button>
-            </mat-form-field>
-          } @else {
-            <mat-form-field appearance="outline" class="full-width">
-              <mat-label>Panoramax Instance API URL</mat-label>
-              <input
-                matInput
-                type="url"
-                [ngModel]="configService.panoramaxBaseUrl()"
-                (ngModelChange)="configService.setPanoramaxBaseUrl($event)"
-                placeholder="https://api.panoramax.xyz/api" />
-            </mat-form-field>
-          }
-
-          <mat-form-field appearance="outline" class="full-width">
-            <mat-label>Location &amp; Geocoding Provider</mat-label>
-            <mat-select
-              [value]="configService.locationService()"
-              [disabled]="configService.isGoogleMapsLocked()"
-              (selectionChange)="onLocationServiceChange($event.value)">
-              <mat-option value="osm">OpenStreetMap (Nominatim &amp; Overpass — No Key Required)</mat-option>
-              <mat-option value="google">Google Maps Platform (Requires API Key)</mat-option>
-            </mat-select>
-          </mat-form-field>
-
-          @if (configService.isGoogleMapsLocked()) {
-            <div class="locked-notice" role="status">
-              <mat-icon aria-hidden="true">lock</mat-icon>
-              <span>Google Maps API key is provided by the host environment and cannot be changed.</span>
-            </div>
-          } @else if (configService.locationService() === 'google') {
-            <mat-form-field appearance="outline" class="full-width">
-              <mat-label>Google Maps API Key</mat-label>
-              <input
-                matInput
-                [type]="showGoogleKey() ? 'text' : 'password'"
-                [ngModel]="configService.googleMapsApiKey()"
-                (ngModelChange)="configService.setGoogleMapsApiKey($event)"
-                placeholder="AIza..."
-                autocomplete="off" />
-              <button
-                mat-icon-button
-                matSuffix
-                type="button"
-                (click)="showGoogleKey.set(!showGoogleKey())"
-                [attr.aria-label]="showGoogleKey() ? 'Hide Google Maps API key' : 'Show Google Maps API key'">
-                <mat-icon>{{ showGoogleKey() ? 'visibility_off' : 'visibility' }}</mat-icon>
-              </button>
-            </mat-form-field>
-          }
-
-          <mat-form-field appearance="outline" class="full-width">
-            <mat-label>AI Vision Provider</mat-label>
-            <mat-select
-              [value]="configService.aiProvider()"
-              [disabled]="configService.isGeminiLocked()"
-              (selectionChange)="onAiProviderChange($event.value)">
-              <mat-option value="gemini">Google Gemini ({{ configService.geminiModelId }})</mat-option>
-              <mat-option value="openai">OpenAI ({{ configService.openaiModelId }})</mat-option>
-            </mat-select>
-          </mat-form-field>
-
-          @if (configService.isGeminiLocked()) {
-            <div class="locked-notice" role="status">
-              <mat-icon aria-hidden="true">lock</mat-icon>
-              <span>Google Gemini API key is provided by the host environment and cannot be changed.</span>
-            </div>
-          } @else if (configService.aiProvider() === 'gemini') {
-            <mat-form-field appearance="outline" class="full-width">
-              <mat-label>Gemini API Key</mat-label>
-              <input
-                matInput
-                [type]="showGeminiKey() ? 'text' : 'password'"
-                [ngModel]="configService.geminiApiKey()"
-                (ngModelChange)="configService.setGeminiApiKey($event)"
-                placeholder="AIza..."
-                autocomplete="off" />
-              <button
-                mat-icon-button
-                matSuffix
-                type="button"
-                (click)="showGeminiKey.set(!showGeminiKey())"
-                [attr.aria-label]="showGeminiKey() ? 'Hide Gemini API key' : 'Show Gemini API key'">
-                <mat-icon>{{ showGeminiKey() ? 'visibility_off' : 'visibility' }}</mat-icon>
-              </button>
-            </mat-form-field>
-          } @else {
-            <mat-form-field appearance="outline" class="full-width">
-              <mat-label>OpenAI API Key</mat-label>
-              <input
-                matInput
-                [type]="showOpenaiKey() ? 'text' : 'password'"
-                [ngModel]="configService.openaiApiKey()"
-                (ngModelChange)="configService.setOpenaiApiKey($event)"
-                placeholder="sk-..."
-                autocomplete="off" />
-              <button
-                mat-icon-button
-                matSuffix
-                type="button"
-                (click)="showOpenaiKey.set(!showOpenaiKey())"
-                [attr.aria-label]="showOpenaiKey() ? 'Hide OpenAI API key' : 'Show OpenAI API key'">
-                <mat-icon>{{ showOpenaiKey() ? 'visibility_off' : 'visibility' }}</mat-icon>
-              </button>
-            </mat-form-field>
-          }
-
-          <mat-form-field appearance="outline" class="full-width">
-            <mat-label>Default Starting Address</mat-label>
-            <input
-              matInput
-              type="text"
-              [ngModel]="configService.startingAddress()"
-              (ngModelChange)="configService.setStartingAddress($event)"
-              placeholder="601 N 34th St, Seattle, WA" />
-          </mat-form-field>
-        </div>
-      </div>
-
       <div class="settings-section">
         <h3>Controls &amp; Display</h3>
         <mat-form-field appearance="outline" class="full-width">
@@ -240,6 +84,16 @@ import { safeStorage } from '../../services/safe_storage';
             <mat-option [value]="10">10</mat-option>
             <mat-option [value]="20">20</mat-option>
           </mat-select>
+        </mat-form-field>
+
+        <mat-form-field appearance="outline" class="full-width">
+          <mat-label>Default Starting Address</mat-label>
+          <input
+            matInput
+            type="text"
+            [ngModel]="configService.startingAddress()"
+            (ngModelChange)="configService.setStartingAddress($event)"
+            placeholder="601 N 34th St, Seattle, WA" />
         </mat-form-field>
 
         <div class="setting-item">
@@ -295,7 +149,7 @@ import { safeStorage } from '../../services/safe_storage';
         <div class="danger-item">
           <span class="danger-text">
             <strong>Delete saved data</strong>
-            <small>This will reset all your settings (API keys, modifier key, speech preferences, etc.) and clear the description cache. The page will reload.</small>
+            <small>This will reset all your saved preferences (modifier key, speech settings, etc.) and clear the description cache. The page will reload.</small>
           </span>
           <button mat-stroked-button (click)="clearCache()">Reset</button>
         </div>
@@ -346,22 +200,6 @@ import { safeStorage } from '../../services/safe_storage';
     }
     .setting-label { font-weight: 500; }
     .full-width { width: 100%; margin-top: 8px; }
-    .locked-notice {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 10px 12px;
-      margin-bottom: 12px;
-      background: #e8f0fe;
-      color: #174ea6;
-      border-radius: 6px;
-      font-size: 13px;
-    }
-    .locked-notice mat-icon {
-      font-size: 18px;
-      width: 18px;
-      height: 18px;
-    }
     .slider-container {
       display: flex;
       flex-direction: column;
@@ -375,40 +213,8 @@ export class SettingsDialog {
   protected readonly stateService = inject(StateService);
   protected readonly configService = inject(ConfigService);
   protected readonly speechOutputService = inject(SpeechOutputService);
-  private readonly routeProvider = inject(RouteProviderService);
-  private readonly navigationService = inject(NavigationService);
   private readonly cache = inject(DescriptionCacheService);
   protected readonly dialogRef = inject(MatDialogRef<SettingsDialog>);
-
-  protected readonly showMapillaryToken = signal(false);
-  protected readonly showGoogleKey = signal(false);
-  protected readonly showGeminiKey = signal(false);
-  protected readonly showOpenaiKey = signal(false);
-
-  protected onImageryProviderChange(provider: ImageryProviderType) {
-    this.configService.setImageryProvider(provider);
-    this.routeProvider.resetState();
-    if (this.configService.hasActiveImageryConfig()) {
-      this.reloadCurrentLocation();
-    }
-  }
-
-  protected onMapillaryTokenChange(token: string) {
-    const hadToken = this.configService.mapillaryToken().length > 0;
-    this.configService.setMapillaryToken(token);
-    if (!hadToken && token.trim().length > 0 && this.configService.imageryProvider() === 'mapillary') {
-      this.routeProvider.resetState();
-      this.reloadCurrentLocation();
-    }
-  }
-
-  protected onLocationServiceChange(service: LocationProviderType) {
-    this.configService.setLocationService(service);
-  }
-
-  protected onAiProviderChange(provider: AiProviderType) {
-    this.configService.setAiProvider(provider);
-  }
 
   protected onRateChange(event: Event) {
     const target = event.target as HTMLInputElement;
@@ -424,22 +230,5 @@ export class SettingsDialog {
       }
     });
     window.location.reload();
-  }
-
-  private reloadCurrentLocation() {
-    this.navigationService.clearSessionCache();
-    const st = this.stateService.state();
-    if (st.location.lat && st.location.lng) {
-      this.navigationService.loadCoordinates(
-        st.location.lat,
-        st.location.lng,
-        st.heading
-      );
-    } else {
-      this.navigationService.loadLocationWithHeading(
-        st.address || this.configService.startingAddress(),
-        st.heading
-      );
-    }
   }
 }

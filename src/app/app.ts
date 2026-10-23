@@ -25,6 +25,7 @@ import { UiService } from './services/ui_service';
 import { StateService } from './services/state_service';
 import { ApiService } from './services/api_service';
 import { ConfigService } from './services/config_service';
+import { safeStorage } from './services/safe_storage';
 import { HotkeyService } from './services/hotkey_service';
 import { CommandService, AppCommand } from './services/command_service';
 import { NavigationService } from './services/navigation_service';
@@ -37,6 +38,7 @@ import { SettingsDialog } from './components/settings_dialog/settings_dialog';
 import { HotkeysDialog } from './components/hotkeys_dialog/hotkeys_dialog';
 import { WelcomeDialogComponent } from './components/welcome_dialog/welcome_dialog';
 import { ActivationDialogComponent } from './components/activation_dialog/activation_dialog';
+import { ErrorDialogComponent } from './components/error_dialog/error_dialog';
 import { PaletteComponent } from './components/palette/palette';
 import { RadarViewComponent } from './components/radar_view/radar_view';
 import { AppController } from "./services/app_controller";
@@ -119,12 +121,27 @@ export class App implements OnInit, OnDestroy {
     void this.initializeStartup();
   }
 
-  private initializeStartup() {
-    const shouldShowWelcome =
-      this.stateService.showWelcome() || !this.configService.hasActiveAiKey();
+  private async initializeStartup() {
+    await this.configService.loadConfig();
 
-    if (shouldShowWelcome) {
-      this.stateService.setShowWelcome(true);
+    if (!safeStorage.getItem('streetreader_max_poi_items')) {
+      this.stateService.setMaxPoiItems(this.configService.maxPoiItems());
+    }
+
+    const missingKeyError = this.configService.validateRequiredKeys();
+    if (missingKeyError) {
+      this.dialog.open(ErrorDialogComponent, {
+        width: '450px',
+        disableClose: true,
+        data: {
+          title: 'Configuration Error',
+          message: missingKeyError
+        }
+      });
+      return;
+    }
+
+    if (this.stateService.showWelcome()) {
       this.openWelcome();
     } else if (this.speechOutputService.enabled()) {
       // If welcome is off but TTS is on, we need an interaction to unlock audio
@@ -230,7 +247,7 @@ export class App implements OnInit, OnDestroy {
         break;
       }
       case 'CLOSE_MODALS':
-        if (this.configService.hasActiveAiKey() && !this.stateService.showWelcome()) {
+        if (!this.stateService.showWelcome()) {
           this.dialog.closeAll();
         }
         this.speechOutputService.stop();

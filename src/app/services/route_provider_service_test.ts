@@ -20,7 +20,9 @@ import { clearAllClientCaches, queryAudit } from './client_cache';
 import {
   ImageryProviderService,
   LocationMetadata,
+  normalizeRawImageId,
 } from './imagery_provider_service';
+import { ConfigService } from './config_service';
 import { LocationProviderService } from './location_provider_service';
 import {
   extractPoisFromOsmElements,
@@ -272,5 +274,74 @@ describe('5-Step RouteProvider Engine (Client-Side)', () => {
     expect(view2.status).toBe('ok');
     // Still only 1 OSM road tile fetch for the entire neighborhood session!
     expect(fetchWaysSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('solves street blocks using a declarative retrieval_type=image / image_format=single provider in streetreaderai.conf', async () => {
+    const pointPanos = [
+      { pano_id: 'p1', location: { lat: 47.649, lng: -122.351 }, date: '2025-05' },
+      { pano_id: 'p2', location: { lat: 47.649, lng: -122.35075 }, date: '2025-05' },
+      { pano_id: 'p3', location: { lat: 47.649, lng: -122.3505 }, date: '2025-05' },
+      { pano_id: 'p4', location: { lat: 47.649, lng: -122.35025 }, date: '2025-05' },
+      { pano_id: 'p5', location: { lat: 47.649, lng: -122.35 }, date: '2025-05' },
+    ];
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = new URL(String(input));
+      const id = url.searchParams.get('id');
+      if (id) {
+        const match = pointPanos.find((p) => p.pano_id === id);
+        return new Response(JSON.stringify(match || {}), { status: match ? 200 : 404 });
+      }
+      const lat = Number(url.searchParams.get('lat'));
+      const lng = Number(url.searchParams.get('lng'));
+      let best = pointPanos[0];
+      let bestD = Infinity;
+      for (const p of pointPanos) {
+        const d = Math.hypot(p.location.lat - lat, p.location.lng - lng);
+        if (d < bestD) {
+          bestD = d;
+          best = p;
+        }
+      }
+      return new Response(JSON.stringify(best), { status: 200 });
+    });
+
+    try {
+      TestBed.configureTestingModule({});
+      const config = TestBed.inject(ConfigService);
+      config.applyConfText(`
+[system]
+imagery_provider = point_test
+
+[imagery.point_test]
+retrieval_type = image
+image_format = single
+point_url = https://example.com/meta?lat={lat}&lng={lng}&r={radius}
+metadata_url = https://example.com/meta?id={imageId}
+image_url = https://example.com/img?id={imageId}&h={heading}&p={pitch}
+id_field = pano_id
+lat_field = location.lat
+lng_field = location.lng
+capture_time_field = date
+      `);
+
+      const imagery = TestBed.inject(ImageryProviderService);
+      const rn = new RoadNetwork();
+      rn.addWays(sampleWays);
+
+      const snap = new AreaSnapshot(rn, [], imagery);
+      await snap.solve(47.649, -122.351);
+
+      const node1 = await placeNode(snap, 'osm_1');
+      const node2 = await placeNode(snap, 'osm_2');
+      expect(normalizeRawImageId(node1?.image?.imageId || '')).toBe('p1');
+      expect(normalizeRawImageId(node2?.image?.imageId || '')).toBe('p5');
+
+      const pass = snap.chosenPasses.get('1:2');
+      expect(pass).toBeTruthy();
+      expect((pass?.chain || []).length).toBeGreaterThanOrEqual(3);
+    } finally {
+      vi.restoreAllMocks();
+    }
   });
 });

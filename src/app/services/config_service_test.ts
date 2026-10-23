@@ -109,4 +109,43 @@ describe('ConfigService', () => {
       delete g['__STREETREADER_GOOGLE_MAPS_API_KEY__'];
     }
   });
+
+  it('parses streetreaderai.conf sections including retrieval_type and image_format and validates required keys', () => {
+    const service = TestBed.inject(ConfigService);
+    expect(service.validateRequiredKeys()).toContain('gemini_api_key');
+
+    service.applyConfText(`
+[system]
+imagery_provider = custom_point
+location_provider = osm
+ai_provider = gemini
+max_poi_items = 5
+
+[keys]
+gemini_api_key = AIzaTestGeminiKey
+custom_imagery_key = CustomKey123
+
+[imagery.custom_point]
+retrieval_type = image
+image_format = single
+requires_key = custom_imagery_key
+point_url = https://example.com/meta?lat={lat}&lng={lng}&r={radius}&key={apiKey}
+metadata_url = https://example.com/meta?id={imageId}&key={apiKey}
+image_url = https://example.com/img?id={imageId}&h={heading}&p={pitch}&key={apiKey}
+id_field = pano_id
+lat_field = location.lat
+lng_field = location.lng
+capture_time_field = date
+    `);
+
+    expect(service.imageryProvider()).toBe('custom_point');
+    expect(service.maxPoiItems()).toBe(5);
+    expect(service.validateRequiredKeys()).toBeNull();
+
+    const plugin = service.getImageryPlugin('custom_point');
+    expect(plugin).toBeTruthy();
+    expect(plugin?.retrievalType).toBe('image');
+    expect(plugin?.imageFormat).toBe('single');
+    expect(plugin?.idField).toEqual(['pano_id']);
+  });
 });

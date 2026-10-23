@@ -16,7 +16,11 @@
 
 import { Injectable, inject } from '@angular/core';
 import { AskQuestionResponse, DescribeImageResponse } from './api_service';
-import { ConfigService } from './config_service';
+import {
+  AiPluginConfig,
+  ConfigService,
+  interpolateUrlTemplate,
+} from './config_service';
 
 export const CHAT_PREAMBLE =
   'You can only answer questions about the visual scene and landmarks to ' +
@@ -86,15 +90,37 @@ function stripDataUrlPrefix(base64OrDataUrl: string): string {
 export class AiProviderService {
   private readonly config = inject(ConfigService);
 
+  private getActivePlugin(): AiPluginConfig {
+    const plugin = this.config.getAiPlugin();
+    if (!plugin) {
+      throw new Error(
+        `AI provider "${this.config.aiProvider()}" is not defined in streetreaderai.conf.`
+      );
+    }
+    return plugin;
+  }
+
+  private ensurePluginKey(plugin: AiPluginConfig): string {
+    if (!plugin.requiresKey) return '';
+    const key = this.config.getKeyByName(plugin.requiresKey);
+    if (!key) {
+      throw new Error(
+        `Missing required key "${plugin.requiresKey}" for AI provider "${plugin.name}". Set it in streetreaderai.conf or streetreaderai.local.conf.`
+      );
+    }
+    return key;
+  }
+
   async describeImage(imageBase64: string): Promise<DescribeImageResponse> {
     if (!imageBase64) {
       throw new Error('Missing image data.');
     }
     const cleanBase64 = stripDataUrlPrefix(imageBase64);
+    const plugin = this.getActivePlugin();
     const description =
-      this.config.aiProvider() === 'openai'
-        ? await this.openaiDescribe(cleanBase64)
-        : await this.geminiDescribe(cleanBase64);
+      plugin.wireFormat === 'openai'
+        ? await this.openaiDescribe(plugin, cleanBase64)
+        : await this.geminiDescribe(plugin, cleanBase64);
     return { description };
   }
 
@@ -107,29 +133,25 @@ export class AiProviderService {
       throw new Error('Missing image or question.');
     }
     const cleanBase64 = stripDataUrlPrefix(imageBase64);
-    return this.config.aiProvider() === 'openai'
-      ? this.openaiAsk(cleanBase64, question, detectActions)
-      : this.geminiAsk(cleanBase64, question, detectActions);
+    const plugin = this.getActivePlugin();
+    return plugin.wireFormat === 'openai'
+      ? this.openaiAsk(plugin, cleanBase64, question, detectActions)
+      : this.geminiAsk(plugin, cleanBase64, question, detectActions);
   }
 
   // =====================================================================
-  // Google Gemini REST API (`gemini-3.8-flash`)
+  // Gemini Wire Format (`wire_format = gemini`)
   // =====================================================================
 
-  private ensureGeminiKey(): string {
-    const key = this.config.geminiApiKey();
-    if (!key) {
-      throw new Error(
-        'Gemini API Key is not configured. Open Settings to enter your Gemini API key.'
-      );
-    }
-    return key;
-  }
-
-  private async fetchGemini(body: Record<string, unknown>): Promise<Response> {
-    const key = this.ensureGeminiKey();
-    const modelId = this.config.geminiModelId;
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelId)}:generateContent?key=${encodeURIComponent(key)}`;
+  private async fetchGemini(
+    plugin: AiPluginConfig,
+    body: Record<string, unknown>
+  ): Promise<Response> {
+    const apiKey = this.ensurePluginKey(plugin);
+    const url = interpolateUrlTemplate(plugin.endpointUrl, {
+      model: plugin.modelId,
+      apiKey,
+    });
     return fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -137,8 +159,11 @@ export class AiProviderService {
     });
   }
 
-  private async geminiDescribe(cleanBase64: string): Promise<string> {
-    const resp = await this.fetchGemini({
+  private async geminiDescribe(
+    plugin: AiPluginConfig,
+    cleanBase64: string
+  ): Promise<string> {
+    const resp = await this.fetchGemini(plugin, {
       contents: [
         {
           parts: [
@@ -166,7 +191,9 @@ export class AiProviderService {
 
     if (!resp.ok) {
       const errBody = await resp.text();
-      throw new Error(`Gemini API error (HTTP ${resp.status}): ${errBody.slice(0, 200)}`);
+      throw new Error(
+        `AI API error (HTTP ${resp.status}): ${errBody.slice(0, 200)}`
+      );
     }
 
     const data = await resp.json();
@@ -184,12 +211,13 @@ export class AiProviderService {
   }
 
   private async geminiAsk(
+    plugin: AiPluginConfig,
     cleanBase64: string,
     question: string,
     detectActions: boolean
   ): Promise<AskQuestionResponse> {
     const prompt = buildQuestionPrompt(question, detectActions);
-    const resp = await this.fetchGemini({
+    const resp = await this.fetchGemini(plugin, {
       contents: [
         {
           parts: [
@@ -228,7 +256,9 @@ export class AiProviderService {
 
     if (!resp.ok) {
       const errBody = await resp.text();
-      throw new Error(`Gemini API error (HTTP ${resp.status}): ${errBody.slice(0, 200)}`);
+      throw new Error(
+        `AI API error (HTTP ${resp.status}): ${errBody.slice(0, 200)}`
+      );
     }
 
     const data = await resp.json();
@@ -253,29 +283,22 @@ export class AiProviderService {
   }
 
   // =====================================================================
-  // OpenAI Chat Completions API (`gpt-5.6-terra`)
+  // OpenAI Chat Completions Wire Format (`wire_format = openai`)
   // =====================================================================
 
-  private ensureOpenaiKey(): string {
-    const key = this.config.openaiApiKey();
-    if (!key) {
-      throw new Error(
-        'OpenAI API Key is not configured. Open Settings to enter your OpenAI API key.'
-      );
-    }
-    return key;
-  }
-
-  private async openaiDescribe(cleanBase64: string): Promise<string> {
-    const key = this.ensureOpenaiKey();
-    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+  private async openaiDescribe(
+    plugin: AiPluginConfig,
+    cleanBase64: string
+  ): Promise<string> {
+    const key = this.ensurePluginKey(plugin);
+    const resp = await fetch(plugin.endpointUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${key}`,
       },
       body: JSON.stringify({
-        model: this.config.openaiModelId,
+        model: plugin.modelId,
         messages: [
           {
             role: 'user',
@@ -296,7 +319,9 @@ export class AiProviderService {
 
     if (!resp.ok) {
       const errBody = await resp.text();
-      throw new Error(`OpenAI API error (HTTP ${resp.status}): ${errBody.slice(0, 200)}`);
+      throw new Error(
+        `AI API error (HTTP ${resp.status}): ${errBody.slice(0, 200)}`
+      );
     }
 
     const data = await resp.json();
@@ -304,21 +329,22 @@ export class AiProviderService {
   }
 
   private async openaiAsk(
+    plugin: AiPluginConfig,
     cleanBase64: string,
     question: string,
     detectActions: boolean
   ): Promise<AskQuestionResponse> {
-    const key = this.ensureOpenaiKey();
+    const key = this.ensurePluginKey(plugin);
     const prompt = buildQuestionPrompt(question, detectActions);
 
-    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+    const resp = await fetch(plugin.endpointUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${key}`,
       },
       body: JSON.stringify({
-        model: this.config.openaiModelId,
+        model: plugin.modelId,
         response_format: {
           type: 'json_schema',
           json_schema: {
@@ -366,7 +392,9 @@ export class AiProviderService {
 
     if (!resp.ok) {
       const errBody = await resp.text();
-      throw new Error(`OpenAI API error (HTTP ${resp.status}): ${errBody.slice(0, 200)}`);
+      throw new Error(
+        `AI API error (HTTP ${resp.status}): ${errBody.slice(0, 200)}`
+      );
     }
 
     const data = await resp.json();

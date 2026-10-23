@@ -25,8 +25,9 @@ import {
 import { metadataCache, queryAudit } from './client_cache';
 import {
   ConfigService,
-  DEFAULT_GOOGLE_MAPS_BASE_URL,
-  DEFAULT_NOMINATIM_BASE_URL,
+  getFieldByPath,
+  interpolateUrlTemplate,
+  LocationPluginConfig,
 } from './config_service';
 import {
   DEFAULT_OVERPASS_ENDPOINTS,
@@ -95,16 +96,178 @@ export function getRelativePosition(
 export class LocationProviderService {
   private readonly config = inject(ConfigService);
 
+  private getActivePlugin(): LocationPluginConfig {
+    const plugin = this.config.getLocationPlugin();
+    if (!plugin) {
+      throw new Error(
+        `Location provider "${this.config.locationService()}" is not defined in streetreaderai.conf.`
+      );
+    }
+    return plugin;
+  }
+
+  private ensurePluginKey(plugin: LocationPluginConfig): string {
+    if (!plugin.requiresKey) return '';
+    const key = this.config.getKeyByName(plugin.requiresKey);
+    if (!key) {
+      throw new Error(
+        `Missing required key "${plugin.requiresKey}" for location provider "${plugin.name}". Set it in streetreaderai.conf or streetreaderai.local.conf.`
+      );
+    }
+    return key;
+  }
+
+  private extractItems(
+    payload: unknown,
+    itemsPath: string
+  ): Record<string, unknown>[] {
+    if (!payload || typeof payload !== 'object') return [];
+    if (Array.isArray(payload)) {
+      return payload as Record<string, unknown>[];
+    }
+    if (!itemsPath) {
+      return [payload as Record<string, unknown>];
+    }
+    const extracted = getFieldByPath(payload, [itemsPath]);
+    if (Array.isArray(extracted)) {
+      return extracted as Record<string, unknown>[];
+    }
+    if (extracted && typeof extracted === 'object') {
+      return [extracted as Record<string, unknown>];
+    }
+    return [];
+  }
+
   async geocode(address: string): Promise<GeocodeResult | null> {
-    return this.config.locationService() === 'google'
-      ? this.googleGeocode(address)
-      : this.osmGeocode(address);
+    const plugin = this.getActivePlugin();
+    if (!plugin.geocodeUrl) return null;
+
+    const norm = address.trim().toLowerCase();
+    const cacheKey = `${plugin.name}:fwd:${norm}`;
+    const cached = metadataCache.get(cacheKey) as GeocodeResult | undefined;
+    if (cached) {
+      queryAudit.recordCacheHit(`${plugin.name}_geocode`);
+      return cached;
+    }
+
+    const apiKey = this.ensurePluginKey(plugin);
+    const url = interpolateUrlTemplate(plugin.geocodeUrl, {
+      address,
+      apiKey,
+    });
+
+    try {
+      queryAudit.recordExternal(`${plugin.name}_fwd`, norm);
+      const resp = await fetch(url, {
+        headers: { Accept: 'application/json' },
+      });
+      if (resp.status === 429) {
+        throw new Error(
+          'Geocoding rate limit exceeded. Please wait a few moments before trying again.'
+        );
+      }
+      if (!resp.ok) return null;
+      const data = await resp.json();
+
+      if (plugin.statusField && plugin.statusOkValue) {
+        const statusVal = getFieldByPath(data, [plugin.statusField]);
+        if (String(statusVal || '') !== plugin.statusOkValue) {
+          return null;
+        }
+      }
+
+      const items = this.extractItems(data, plugin.itemsPath);
+      if (items.length === 0) return null;
+      const first = items[0];
+
+      const rawLat = getFieldByPath(first, plugin.latField);
+      const rawLng = getFieldByPath(first, plugin.lngField);
+      if (rawLat === undefined || rawLng === undefined) return null;
+
+      let street =
+        plugin.streetField.length > 0
+          ? (getFieldByPath(first, plugin.streetField) as string | undefined) ??
+            null
+          : null;
+      if (!street && Array.isArray(first['address_components'])) {
+        for (const comp of first['address_components'] as Array<
+          Record<string, unknown>
+        >) {
+          const types = comp['types'];
+          if (Array.isArray(types) && types.includes('route')) {
+            street = String(comp['long_name'] || '') || null;
+            break;
+          }
+        }
+      }
+
+      const rawAddr = getFieldByPath(first, plugin.addressField);
+      const res: GeocodeResult = {
+        lat: Number(rawLat),
+        lng: Number(rawLng),
+        address: String(rawAddr || address),
+        street,
+      };
+      metadataCache.put(cacheKey, res);
+      return res;
+    } catch (e) {
+      if (e instanceof Error && e.message.includes('rate limit')) {
+        throw e;
+      }
+    }
+    return null;
   }
 
   async reverseGeocode(lat: number, lng: number): Promise<string | null> {
-    return this.config.locationService() === 'google'
-      ? this.googleReverseGeocode(lat, lng)
-      : this.osmReverseGeocode(lat, lng);
+    const plugin = this.getActivePlugin();
+    if (!plugin.reverseGeocodeUrl) return null;
+
+    const cacheKey = `${plugin.name}:rev:${lat.toFixed(5)}:${lng.toFixed(5)}`;
+    const cached = metadataCache.get(cacheKey) as
+      | { formatted_address?: string }
+      | undefined;
+    if (cached?.formatted_address) {
+      queryAudit.recordCacheHit(`${plugin.name}_rev_geocode`);
+      return cached.formatted_address;
+    }
+
+    const apiKey = this.ensurePluginKey(plugin);
+    const url = interpolateUrlTemplate(plugin.reverseGeocodeUrl, {
+      lat,
+      lng,
+      apiKey,
+    });
+
+    try {
+      queryAudit.recordExternal(
+        `${plugin.name}_rev`,
+        `${lat.toFixed(5)},${lng.toFixed(5)}`
+      );
+      const resp = await fetch(url, {
+        headers: { Accept: 'application/json' },
+      });
+      if (!resp.ok) return null;
+      const data = await resp.json();
+
+      if (plugin.statusField && plugin.statusOkValue) {
+        const statusVal = getFieldByPath(data, [plugin.statusField]);
+        if (String(statusVal || '') !== plugin.statusOkValue) {
+          return null;
+        }
+      }
+
+      const items = this.extractItems(data, plugin.itemsPath);
+      if (items.length === 0) return null;
+      const rawAddr = getFieldByPath(items[0], plugin.addressField);
+      if (rawAddr) {
+        const formatted = String(rawAddr);
+        metadataCache.put(cacheKey, { formatted_address: formatted });
+        return formatted;
+      }
+    } catch {
+      // Ignore reverse geocode errors
+    }
+    return null;
   }
 
   async autocomplete(
@@ -115,11 +278,104 @@ export class LocationProviderService {
     if (!trimmed) {
       return { suggestions: [] };
     }
-    const suggestions =
-      this.config.locationService() === 'google'
-        ? await this.googleAutocomplete(trimmed, sessionToken)
-        : await this.osmAutocomplete(trimmed);
+    const plugin = this.getActivePlugin();
+    const suggestions = await this.pluginAutocomplete(
+      plugin,
+      trimmed,
+      sessionToken
+    );
     return { suggestions };
+  }
+
+  private async pluginAutocomplete(
+    plugin: LocationPluginConfig,
+    query: string,
+    sessionToken?: string
+  ): Promise<AutocompleteItem[]> {
+    const norm = query.trim().toLowerCase();
+    if (norm.length < 3) return [];
+    if (!plugin.autocompleteUrl) return [];
+
+    // POST-based Places v1 autocomplete endpoint
+    if (plugin.autocompleteUrl.includes(':autocomplete')) {
+      const apiKey = this.ensurePluginKey(plugin);
+      queryAudit.recordExternal(`${plugin.name}_auto`, norm);
+      try {
+        const body: Record<string, unknown> = { input: query };
+        if (sessionToken) {
+          body['sessionToken'] = sessionToken;
+        }
+        const resp = await fetch(plugin.autocompleteUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Goog-Api-Key': apiKey,
+          },
+          body: JSON.stringify(body),
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          const suggestions = Array.isArray(data?.suggestions)
+            ? data.suggestions
+            : [];
+          return suggestions
+            .map((s: Record<string, unknown>) => {
+              const pred = s['placePrediction'] as
+                | Record<string, unknown>
+                | undefined;
+              const textObj = pred?.['text'] as { text?: string } | undefined;
+              return {
+                description: String(textObj?.text || ''),
+                placeId: String(pred?.['placeId'] || ''),
+              };
+            })
+            .filter((item: AutocompleteItem) => Boolean(item.description));
+        }
+      } catch {
+        // Fall through to geocode fallback
+      }
+      try {
+        const geo = await this.geocode(query);
+        if (geo) {
+          return [{ description: geo.address, placeId: geo.address }];
+        }
+      } catch {
+        // Ignore fallback error
+      }
+      return [];
+    }
+
+    const cacheKey = `${plugin.name}:auto:${norm}`;
+    const cached = metadataCache.get(cacheKey) as AutocompleteItem[] | undefined;
+    if (cached) {
+      queryAudit.recordCacheHit(`${plugin.name}_auto`);
+      return cached;
+    }
+
+    const apiKey = this.ensurePluginKey(plugin);
+    const url = interpolateUrlTemplate(plugin.autocompleteUrl, {
+      query,
+      apiKey,
+    });
+    try {
+      queryAudit.recordExternal(`${plugin.name}_auto`, norm);
+      const resp = await fetch(url, {
+        headers: { Accept: 'application/json' },
+      });
+      if (!resp.ok) return [];
+      const data = await resp.json();
+      const items = this.extractItems(data, plugin.itemsPath);
+      const results = items
+        .map((p) => ({
+          description: String(getFieldByPath(p, plugin.addressField) ?? ''),
+          placeId: String(getFieldByPath(p, plugin.placeIdField) ?? ''),
+        }))
+        .filter((item) => Boolean(item.description));
+      metadataCache.put(cacheKey, results);
+      return results;
+    } catch {
+      return [];
+    }
   }
 
   async getNearbyPlaces(params: {
@@ -130,10 +386,10 @@ export class LocationProviderService {
   }): Promise<GetNearbyPlacesResponse> {
     const radius = params.radius ?? 100;
     const heading = params.heading ?? 0;
-    const rawPlaces =
-      this.config.locationService() === 'google'
-        ? await this.googleNearbySearch(params.lat, params.lng, radius)
-        : await this.osmNearbySearch(params.lat, params.lng, radius);
+    const plugin = this.getActivePlugin();
+    const rawPlaces = plugin.nearbyUrl
+      ? await this.pluginNearbySearch(plugin, params.lat, params.lng, radius)
+      : await this.osmNearbySearch(params.lat, params.lng, radius);
 
     const places: NearbyPlace[] = [];
     for (const p of rawPlaces) {
@@ -153,131 +409,6 @@ export class LocationProviderService {
       });
     }
     return { places };
-  }
-
-  // =====================================================================
-  // OpenStreetMap (Nominatim + Overpass)
-  // =====================================================================
-
-  private async osmGeocode(address: string): Promise<GeocodeResult | null> {
-    const norm = address.trim().toLowerCase();
-    const cacheKey = `nominatim:fwd:${DEFAULT_NOMINATIM_BASE_URL}:${norm}`;
-    const cached = metadataCache.get(cacheKey) as GeocodeResult | undefined;
-    if (cached) {
-      queryAudit.recordCacheHit('nominatim');
-      return cached;
-    }
-
-    const url = new URL(`${DEFAULT_NOMINATIM_BASE_URL}/search`);
-    url.searchParams.set('q', address);
-    url.searchParams.set('format', 'json');
-    url.searchParams.set('limit', '1');
-    url.searchParams.set('addressdetails', '1');
-
-    try {
-      queryAudit.recordExternal('nominatim_fwd', norm);
-      const resp = await fetch(url.toString(), {
-        headers: { Accept: 'application/json' },
-      });
-      if (resp.status === 429) {
-        throw new Error(
-          'OpenStreetMap rate limit exceeded. Please wait a few moments before trying again.'
-        );
-      }
-      if (!resp.ok) return null;
-      const data = await resp.json();
-      if (Array.isArray(data) && data.length > 0) {
-        const first = data[0];
-        const details = first.address || {};
-        const res: GeocodeResult = {
-          lat: Number(first.lat),
-          lng: Number(first.lon),
-          address: String(first.display_name || address),
-          street: details.road || details.pedestrian || null,
-        };
-        metadataCache.put(cacheKey, res);
-        return res;
-      }
-    } catch (e) {
-      if (e instanceof Error && e.message.includes('rate limit')) {
-        throw e;
-      }
-    }
-    return null;
-  }
-
-  private async osmReverseGeocode(
-    lat: number,
-    lng: number
-  ): Promise<string | null> {
-    const cacheKey = `nominatim:rev:${DEFAULT_NOMINATIM_BASE_URL}:${lat.toFixed(5)}:${lng.toFixed(5)}`;
-    const cached = metadataCache.get(cacheKey) as
-      | { formatted_address?: string }
-      | undefined;
-    if (cached?.formatted_address) {
-      queryAudit.recordCacheHit('nominatim');
-      return cached.formatted_address;
-    }
-
-    const url = new URL(`${DEFAULT_NOMINATIM_BASE_URL}/reverse`);
-    url.searchParams.set('lat', String(lat));
-    url.searchParams.set('lon', String(lng));
-    url.searchParams.set('format', 'json');
-
-    try {
-      queryAudit.recordExternal(
-        'nominatim_rev',
-        `${lat.toFixed(5)},${lng.toFixed(5)}`
-      );
-      const resp = await fetch(url.toString(), {
-        headers: { Accept: 'application/json' },
-      });
-      if (!resp.ok) return null;
-      const data = await resp.json();
-      if (data?.display_name) {
-        const formatted = String(data.display_name);
-        metadataCache.put(cacheKey, { formatted_address: formatted });
-        return formatted;
-      }
-    } catch {
-      // Ignore reverse geocode errors
-    }
-    return null;
-  }
-
-  private async osmAutocomplete(query: string): Promise<AutocompleteItem[]> {
-    const norm = query.trim().toLowerCase();
-    if (norm.length < 3) return [];
-    const cacheKey = `nominatim:auto:${DEFAULT_NOMINATIM_BASE_URL}:${norm}`;
-    const cached = metadataCache.get(cacheKey) as AutocompleteItem[] | undefined;
-    if (cached) {
-      queryAudit.recordCacheHit('nominatim');
-      return cached;
-    }
-
-    const url = new URL(`${DEFAULT_NOMINATIM_BASE_URL}/search`);
-    url.searchParams.set('q', query);
-    url.searchParams.set('format', 'json');
-    url.searchParams.set('limit', '5');
-    try {
-      queryAudit.recordExternal('nominatim_auto', norm);
-      const resp = await fetch(url.toString(), {
-        headers: { Accept: 'application/json' },
-      });
-      if (!resp.ok) return [];
-      const data = await resp.json();
-      if (Array.isArray(data)) {
-        const items = data.map((p: Record<string, unknown>) => ({
-          description: String(p['display_name'] ?? ''),
-          placeId: String(p['place_id'] ?? ''),
-        }));
-        metadataCache.put(cacheKey, items);
-        return items;
-      }
-    } catch {
-      // Ignore autocomplete errors
-    }
-    return [];
   }
 
   private async osmNearbySearch(
@@ -387,159 +518,8 @@ export class LocationProviderService {
     return [];
   }
 
-  // =====================================================================
-  // Google Maps Platform (Geocoding API + Places API v1)
-  // =====================================================================
-
-  private ensureGoogleKey(): string {
-    const key = this.config.googleMapsApiKey();
-    if (!key) {
-      throw new Error(
-        'Google Maps API Key is not configured. Open Settings to enter a Google Maps API key or switch to OpenStreetMap.'
-      );
-    }
-    return key;
-  }
-
-  private async googleGeocode(address: string): Promise<GeocodeResult | null> {
-    const key = this.ensureGoogleKey();
-    const norm = address.trim().toLowerCase();
-    const cacheKey = `google:fwd:${DEFAULT_GOOGLE_MAPS_BASE_URL}:${norm}`;
-    const cached = metadataCache.get(cacheKey) as GeocodeResult | undefined;
-    if (cached) {
-      queryAudit.recordCacheHit('google_geocode');
-      return cached;
-    }
-
-    const url = new URL(`${DEFAULT_GOOGLE_MAPS_BASE_URL}/geocode/json`);
-    url.searchParams.set('address', address);
-    url.searchParams.set('key', key);
-
-    queryAudit.recordExternal('google_geocode', norm);
-    const resp = await fetch(url.toString());
-    if (!resp.ok) return null;
-    const data = await resp.json();
-    if (
-      data?.status === 'OK' &&
-      Array.isArray(data.results) &&
-      data.results.length > 0
-    ) {
-      const result = data.results[0];
-      let street: string | null = null;
-      const comps = Array.isArray(result.address_components)
-        ? result.address_components
-        : [];
-      for (const comp of comps) {
-        if (Array.isArray(comp.types) && comp.types.includes('route')) {
-          street = comp.long_name || null;
-          break;
-        }
-      }
-      const res: GeocodeResult = {
-        lat: Number(result.geometry.location.lat),
-        lng: Number(result.geometry.location.lng),
-        address: String(result.formatted_address || address),
-        street,
-      };
-      metadataCache.put(cacheKey, res);
-      return res;
-    }
-    return null;
-  }
-
-  private async googleReverseGeocode(
-    lat: number,
-    lng: number
-  ): Promise<string | null> {
-    const key = this.ensureGoogleKey();
-    const cacheKey = `google:rev:${DEFAULT_GOOGLE_MAPS_BASE_URL}:${lat.toFixed(5)}:${lng.toFixed(5)}`;
-    const cached = metadataCache.get(cacheKey) as
-      | { formatted_address?: string }
-      | undefined;
-    if (cached?.formatted_address) {
-      queryAudit.recordCacheHit('google_rev_geocode');
-      return cached.formatted_address;
-    }
-
-    const url = new URL(`${DEFAULT_GOOGLE_MAPS_BASE_URL}/geocode/json`);
-    url.searchParams.set('latlng', `${lat},${lng}`);
-    url.searchParams.set('key', key);
-
-    queryAudit.recordExternal(
-      'google_rev_geocode',
-      `${lat.toFixed(5)},${lng.toFixed(5)}`
-    );
-    const resp = await fetch(url.toString());
-    if (!resp.ok) return null;
-    const data = await resp.json();
-    if (
-      data?.status === 'OK' &&
-      Array.isArray(data.results) &&
-      data.results.length > 0
-    ) {
-      const out = data.results[0];
-      metadataCache.put(cacheKey, out);
-      return out.formatted_address || null;
-    }
-    return null;
-  }
-
-  private async googleAutocomplete(
-    query: string,
-    sessionToken?: string
-  ): Promise<AutocompleteItem[]> {
-    const key = this.ensureGoogleKey();
-    queryAudit.recordExternal('google_autocomplete', query.toLowerCase());
-    try {
-      const body: Record<string, unknown> = { input: query };
-      if (sessionToken) {
-        body['sessionToken'] = sessionToken;
-      }
-      const resp = await fetch(
-        'https://places.googleapis.com/v1/places:autocomplete',
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Goog-Api-Key': key,
-          },
-          body: JSON.stringify(body),
-        }
-      );
-      if (resp.ok) {
-        const data = await resp.json();
-        const suggestions = Array.isArray(data?.suggestions)
-          ? data.suggestions
-          : [];
-        return suggestions
-          .map((s: Record<string, unknown>) => {
-            const pred = s['placePrediction'] as
-              | Record<string, unknown>
-              | undefined;
-            const textObj = pred?.['text'] as { text?: string } | undefined;
-            return {
-              description: String(textObj?.text || ''),
-              placeId: String(pred?.['placeId'] || ''),
-            };
-          })
-          .filter((item: AutocompleteItem) => Boolean(item.description));
-      }
-    } catch {
-      // Fall back to Geocoding API suggestions if Places v1 isn't enabled on key
-    }
-
-    try {
-      const geo = await this.googleGeocode(query);
-      if (geo) {
-        return [{ description: geo.address, placeId: geo.address }];
-      }
-    } catch {
-      // Ignore fallback error
-    }
-    return [];
-  }
-
-  private async googleNearbySearch(
+  private async pluginNearbySearch(
+    plugin: LocationPluginConfig,
     lat: number,
     lng: number,
     radius: number
@@ -552,8 +532,8 @@ export class LocationProviderService {
       types: string[];
     }>
   > {
-    const key = this.ensureGoogleKey();
-    const cacheKey = `google:nearby:${lat.toFixed(4)}:${lng.toFixed(4)}:${radius}`;
+    const apiKey = this.ensurePluginKey(plugin);
+    const cacheKey = `${plugin.name}:nearby:${lat.toFixed(4)}:${lng.toFixed(4)}:${radius}`;
     const cached = metadataCache.get(cacheKey) as
       | Array<{
           lat: number;
@@ -564,36 +544,33 @@ export class LocationProviderService {
         }>
       | undefined;
     if (cached) {
-      queryAudit.recordCacheHit('google_nearby');
+      queryAudit.recordCacheHit(`${plugin.name}_nearby`);
       return cached;
     }
 
     queryAudit.recordExternal(
-      'google_nearby',
+      `${plugin.name}_nearby`,
       `${lat.toFixed(4)},${lng.toFixed(4)}:${radius}`
     );
     try {
-      const resp = await fetch(
-        'https://places.googleapis.com/v1/places:searchNearby',
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Goog-Api-Key': key,
-            'X-Goog-FieldMask':
-              'places.displayName,places.shortFormattedAddress,places.formattedAddress,places.location,places.types',
-          },
-          body: JSON.stringify({
-            maxResultCount: 20,
-            locationRestriction: {
-              circle: {
-                center: { latitude: lat, longitude: lng },
-                radius,
-              },
+      const resp = await fetch(plugin.nearbyUrl!, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Goog-Api-Key': apiKey,
+          'X-Goog-FieldMask':
+            'places.displayName,places.shortFormattedAddress,places.formattedAddress,places.location,places.types',
+        },
+        body: JSON.stringify({
+          maxResultCount: 20,
+          locationRestriction: {
+            circle: {
+              center: { latitude: lat, longitude: lng },
+              radius,
             },
-          }),
-        }
-      );
+          },
+        }),
+      });
       if (resp.ok) {
         const data = await resp.json();
         const places = Array.isArray(data?.places) ? data.places : [];
@@ -618,7 +595,7 @@ export class LocationProviderService {
         return results;
       }
     } catch {
-      // Fall back to Overpass nearby POIs if Places API (New) is not enabled
+      // Fall back to OSM nearby POIs
     }
     return this.osmNearbySearch(lat, lng, radius);
   }

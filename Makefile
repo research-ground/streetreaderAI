@@ -13,7 +13,8 @@ help:
 
 setup:
 	npm install
-	@echo "==> Setup complete. Run 'make start' and configure API keys in the First-Run / Settings dialog."
+	@if [ ! -f streetreaderai.conf ]; then cp streetreaderai.conf.example streetreaderai.conf && echo "==> Created streetreaderai.conf from streetreaderai.conf.example"; fi
+	@echo "==> Setup complete. Edit streetreaderai.conf to configure API keys and providers, then run 'make start'."
 
 build:
 	@echo "==> Building static Angular SPA into dist/..."

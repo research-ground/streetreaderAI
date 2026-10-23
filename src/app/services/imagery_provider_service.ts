@@ -19,9 +19,11 @@ import { LatLng } from './api_service';
 import { metadataCache, queryAudit, singleflight, windowCache } from './client_cache';
 import {
   ConfigService,
-  DEFAULT_MAPILLARY_BASE_URL,
-  DEFAULT_PANORAMAX_BASE_URL,
+  getFieldByPath,
+  ImageryPluginConfig,
+  interpolateUrlTemplate,
 } from './config_service';
+import { calculateDistance, M_PER_DEG_LAT } from './location_provider_service';
 import { PanoramaCropService } from './panorama_crop_service';
 
 export interface LocationMetadata {
@@ -60,12 +62,31 @@ export interface ImageryProviderClient {
   ): Promise<RenderedImageResult | null>;
 }
 
-function isoToEpochMs(raw: unknown): string {
+function normalizeEpochMs(raw: unknown): string {
   if (!raw) return '';
   const s = String(raw).trim();
   if (/^\d+$/.test(s)) return s;
-  const ms = Date.parse(s);
-  return Number.isNaN(ms) ? s : String(ms);
+  const parsed = Date.parse(s.length === 7 ? `${s}-01T00:00:00Z` : s);
+  return Number.isNaN(parsed) ? s : String(parsed);
+}
+
+export function normalizeRawImageId(imageId: string): string {
+  const raw = String(imageId || '').trim();
+  const atIdx = raw.indexOf('@');
+  return atIdx >= 0 ? raw.slice(0, atIdx) : raw;
+}
+
+function compassBearingLocal(
+  lat1: number,
+  lng1: number,
+  lat2: number,
+  lng2: number
+): number {
+  const dx =
+    (lng2 - lng1) * Math.cos((((lat1 + lat2) * 0.5) * Math.PI) / 180.0);
+  const dy = lat2 - lat1;
+  if (Math.abs(dx) < 1e-12 && Math.abs(dy) < 1e-12) return 0.0;
+  return (((Math.atan2(dx, dy) * 180.0) / Math.PI) + 360.0) % 360.0;
 }
 
 @Injectable({
@@ -74,155 +95,123 @@ function isoToEpochMs(raw: unknown): string {
 export class ImageryProviderService implements ImageryProviderClient {
   private readonly config = inject(ConfigService);
   private readonly cropService = inject(PanoramaCropService);
-  private readonly panoramaxMemMeta = new Map<string, LocationMetadata>();
+  private readonly memMeta = new Map<string, LocationMetadata>();
+  private readonly knownJunctions = new Map<string, LocationMetadata>();
   private readonly defaultFov = 120;
   private readonly panosOnly = true;
+
+  private pendingJunctionCount = 0;
+  private batchWaiters: Array<() => void> = [];
 
   get providerName(): string {
     return this.config.imageryProvider();
   }
 
-  getMetadata(imageId: string): Promise<LocationMetadata | null> {
-    return this.config.imageryProvider() === 'mapillary'
-      ? this.getMapillaryMetadata(imageId)
-      : this.getPanoramaxMetadata(imageId);
-  }
-
-  getSequence(sequenceId: string): Promise<LocationMetadata[]> {
-    return this.config.imageryProvider() === 'mapillary'
-      ? this.getMapillarySequence(sequenceId)
-      : this.getPanoramaxSequence(sequenceId);
-  }
-
-  getMetadataBbox(
-    minLat: number,
-    minLng: number,
-    maxLat: number,
-    maxLng: number
-  ): Promise<LocationMetadata[]> {
-    return this.config.imageryProvider() === 'mapillary'
-      ? this.getMapillaryMetadataBbox(minLat, minLng, maxLat, maxLng)
-      : this.getPanoramaxMetadataBbox(minLat, minLng, maxLat, maxLng);
-  }
-
-  getImage(
-    imageId: string,
-    heading: number = 0,
-    pitch: number = 0
-  ): Promise<RenderedImageResult | null> {
-    return this.config.imageryProvider() === 'mapillary'
-      ? this.getMapillaryImage(imageId, heading, pitch)
-      : this.getPanoramaxImage(imageId, heading, pitch);
-  }
-
-  // =====================================================================
-  // Mapillary Graph API v4 Client
-  // =====================================================================
-
-  private ensureMapillaryToken(): string {
-    const token = this.config.mapillaryToken();
-    if (!token) {
+  private getActivePlugin(): ImageryPluginConfig {
+    const plugin = this.config.getImageryPlugin();
+    if (!plugin) {
       throw new Error(
-        'Mapillary Client Token is not configured. Open Settings to enter a Mapillary token or switch to Panoramax.'
+        `Imagery provider "${this.providerName}" is not defined in streetreaderai.conf.`
       );
     }
-    return token;
+    return plugin;
   }
 
-  private async getMapillaryMetadata(imageId: string): Promise<LocationMetadata | null> {
-    const metaKey = `mapillary:${imageId}`;
+  private ensurePluginKey(plugin: ImageryPluginConfig): string {
+    if (!plugin.requiresKey) return '';
+    const key = this.config.getKeyByName(plugin.requiresKey);
+    if (!key) {
+      throw new Error(
+        `Missing required key "${plugin.requiresKey}" for imagery provider "${plugin.name}". Set it in streetreaderai.conf or streetreaderai.local.conf.`
+      );
+    }
+    return key;
+  }
+
+  async getMetadata(imageId: string): Promise<LocationMetadata | null> {
+    const plugin = this.getActivePlugin();
+    const rawId = normalizeRawImageId(imageId);
+    if (!rawId) return null;
+
+    const metaKey = `${plugin.name}:${rawId}`;
+    const mem = this.memMeta.get(metaKey);
+    if (mem) {
+      queryAudit.recordCacheHit(`${plugin.name}_meta`);
+      return { ...mem, imageId: String(imageId) };
+    }
+
     const cached = metadataCache.get(metaKey) as LocationMetadata | undefined;
     if (cached) {
-      queryAudit.recordCacheHit('mapillary_meta');
-      return cached;
+      queryAudit.recordCacheHit(`${plugin.name}_meta`);
+      this.memMeta.set(metaKey, cached);
+      return { ...cached, imageId: String(imageId) };
     }
 
+    if (!plugin.metadataUrl) return null;
     try {
-      const token = this.ensureMapillaryToken();
-      queryAudit.recordExternal('mapillary_meta', String(imageId));
-      const url = new URL(`${DEFAULT_MAPILLARY_BASE_URL}/${encodeURIComponent(imageId)}`);
-      url.searchParams.set('access_token', token);
-      url.searchParams.set(
-        'fields',
-        'id,geometry,compass_angle,computed_compass_angle,captured_at,is_pano,sequence,thumb_original_url,thumb_2048_url'
-      );
-      const resp = await fetch(url.toString());
+      const apiKey = this.ensurePluginKey(plugin);
+      const url = interpolateUrlTemplate(plugin.metadataUrl, {
+        imageId: rawId,
+        apiKey,
+      });
+      queryAudit.recordExternal(`${plugin.name}_meta`, rawId);
+      const resp = await fetch(url);
       if (!resp.ok) return null;
-      const data = await resp.json();
-      const coords = data?.geometry?.coordinates;
-      if (!Array.isArray(coords) || coords.length < 2) return null;
-
-      const meta: LocationMetadata = {
-        imageId: String(data.id),
-        coordinates: { latitude: Number(coords[1]), longitude: Number(coords[0]) },
-        captureTime: String(data.captured_at ?? ''),
-        heading: Number(data.computed_compass_angle ?? data.compass_angle ?? 0),
-        isPano: Boolean(data.is_pano),
-        sequenceId: data.sequence ? String(data.sequence) : null,
-        thumbUrl: data.thumb_original_url || data.thumb_2048_url || null,
-        provider: 'mapillary',
-      };
-      metadataCache.put(metaKey, meta);
-      return meta;
+      const payload = await resp.json();
+      const items = this.extractItems(payload, plugin.itemsPath);
+      if (items.length === 0) return null;
+      const parsed = this.parsePluginItem(plugin, items[0], true);
+      if (!parsed) return null;
+      return { ...parsed, imageId: String(imageId) };
     } catch {
       return null;
     }
   }
 
-  private async getMapillarySequence(sequenceId: string): Promise<LocationMetadata[]> {
+  async getSequence(sequenceId: string): Promise<LocationMetadata[]> {
+    const plugin = this.getActivePlugin();
     if (!sequenceId) return [];
     const seqStr = String(sequenceId);
-    const seqKey = `mapillary:seq:${seqStr}`;
+
+    if (plugin.retrievalType === 'image') {
+      return this.getPointSampledSequence(plugin, seqStr);
+    }
+
+    const seqKey = `${plugin.name}:seq:${seqStr}`;
     const cached = windowCache.get(seqKey) as LocationMetadata[] | undefined;
     if (cached) {
-      queryAudit.recordCacheHit('mapillary_seq');
+      queryAudit.recordCacheHit(`${plugin.name}_seq`);
       return cached;
     }
 
-    return singleflight(`mapillary_seq:${this.panosOnly}:${seqStr}`, async () => {
+    return singleflight(`${plugin.name}_seq:${this.panosOnly}:${seqStr}`, async () => {
       const again = windowCache.get(seqKey) as LocationMetadata[] | undefined;
       if (again) {
-        queryAudit.recordCacheHit('mapillary_seq');
+        queryAudit.recordCacheHit(`${plugin.name}_seq`);
         return again;
       }
 
-      const token = this.ensureMapillaryToken();
-      const url = new URL(`${DEFAULT_MAPILLARY_BASE_URL}/images`);
-      url.searchParams.set('access_token', token);
-      url.searchParams.set('sequence_ids', seqStr);
-      url.searchParams.set(
-        'fields',
-        'id,geometry,compass_angle,computed_compass_angle,captured_at,is_pano,sequence'
-      );
-      url.searchParams.set('limit', '500');
-      if (this.panosOnly) {
-        url.searchParams.set('is_pano', 'true');
-      }
+      if (!plugin.sequenceUrl) return [];
+      const apiKey = this.ensurePluginKey(plugin);
+      const url = interpolateUrlTemplate(plugin.sequenceUrl, {
+        sequenceId: seqStr,
+        apiKey,
+      });
 
-      queryAudit.recordExternal('mapillary_seq', seqStr);
+      queryAudit.recordExternal(`${plugin.name}_seq`, seqStr);
       try {
-        const resp = await fetch(url.toString());
+        const resp = await fetch(url);
         if (!resp.ok) return [];
         const payload = await resp.json();
-        const data: Record<string, unknown>[] = Array.isArray(payload?.data)
-          ? payload.data
-          : [];
+        const items = this.extractItems(payload, plugin.itemsPath);
         const results: LocationMetadata[] = [];
-        for (const img of data) {
-          const geom = img['geometry'] as { coordinates?: number[] } | undefined;
-          const coords = geom?.coordinates;
-          if (!Array.isArray(coords) || coords.length < 2) continue;
-          results.push({
-            imageId: String(img['id']),
-            coordinates: { latitude: Number(coords[1]), longitude: Number(coords[0]) },
-            captureTime: String(img['captured_at'] ?? ''),
-            heading: Number(
-              img['computed_compass_angle'] ?? img['compass_angle'] ?? 0
-            ),
-            isPano: Boolean(img['is_pano']),
-            sequenceId: img['sequence'] ? String(img['sequence']) : seqStr,
-            provider: 'mapillary',
-          });
+        const seen = new Set<string>();
+        for (const item of items) {
+          const meta = this.parsePluginItem(plugin, item, false, seqStr);
+          if (!meta || seen.has(meta.imageId)) continue;
+          if (this.panosOnly && !meta.isPano) continue;
+          seen.add(meta.imageId);
+          results.push(meta);
         }
         results.sort((a, b) => {
           const ta = /^\d+$/.test(a.captureTime) ? Number(a.captureTime) : 0;
@@ -238,40 +227,43 @@ export class ImageryProviderService implements ImageryProviderClient {
     });
   }
 
-  private async getMapillaryMetadataBbox(
+  async getMetadataBbox(
     minLat: number,
     minLng: number,
     maxLat: number,
     maxLng: number
   ): Promise<LocationMetadata[]> {
-    const token = this.ensureMapillaryToken();
-    const bboxStr = `${minLng},${minLat},${maxLng},${maxLat}`;
-    const sfKey = `mapillary_bbox:${this.panosOnly}:${minLng.toFixed(6)},${minLat.toFixed(6)},${maxLng.toFixed(6)},${maxLat.toFixed(6)}`;
+    const plugin = this.getActivePlugin();
+    if (plugin.retrievalType === 'image') {
+      return this.getPointSampledBbox(plugin, minLat, minLng, maxLat, maxLng);
+    }
+
+    if (!plugin.bboxUrl) return [];
+    const apiKey = this.ensurePluginKey(plugin);
+    const sfKey = `${plugin.name}_bbox:${this.panosOnly}:${minLng.toFixed(6)},${minLat.toFixed(6)},${maxLng.toFixed(6)},${maxLat.toFixed(6)}`;
 
     return singleflight(sfKey, async () => {
-      const url = new URL(`${DEFAULT_MAPILLARY_BASE_URL}/images`);
-      url.searchParams.set('access_token', token);
-      url.searchParams.set(
-        'fields',
-        'id,geometry,compass_angle,computed_compass_angle,captured_at,is_pano,sequence'
-      );
-      url.searchParams.set('bbox', bboxStr);
-      url.searchParams.set('limit', '500');
-      if (this.panosOnly) {
-        url.searchParams.set('is_pano', 'true');
-      }
+      const url = interpolateUrlTemplate(plugin.bboxUrl!, {
+        minLat,
+        minLng,
+        maxLat,
+        maxLng,
+        bbox: `${minLng},${minLat},${maxLng},${maxLat}`,
+        apiKey,
+      });
 
       queryAudit.recordExternal(
-        'mapillary_bbox',
+        `${plugin.name}_bbox`,
         `${minLat.toFixed(5)},${minLng.toFixed(5)},${maxLat.toFixed(5)},${maxLng.toFixed(5)}`
       );
-      const resp = await fetch(url.toString());
+      const resp = await fetch(url);
       let payload: Record<string, unknown> = {};
       try {
         payload = (await resp.json()) || {};
       } catch {
         payload = {};
       }
+
       const errObj = payload['error'] as { message?: string } | undefined;
       const errMsg = (errObj?.message || '').toLowerCase();
       if (
@@ -281,328 +273,23 @@ export class ImageryProviderService implements ImageryProviderClient {
         return [];
       }
       if (!resp.ok) {
-        throw new Error(`Mapillary imagery service error (HTTP ${resp.status})`);
-      }
-
-      const data: Record<string, unknown>[] = Array.isArray(payload['data'])
-        ? (payload['data'] as Record<string, unknown>[])
-        : [];
-      const results: LocationMetadata[] = [];
-      for (const img of data) {
-        const geom = img['geometry'] as { coordinates?: number[] } | undefined;
-        const coords = geom?.coordinates;
-        if (!Array.isArray(coords) || coords.length < 2) continue;
-        results.push({
-          imageId: String(img['id']),
-          coordinates: { latitude: Number(coords[1]), longitude: Number(coords[0]) },
-          captureTime: String(img['captured_at'] ?? ''),
-          heading: Number(
-            img['computed_compass_angle'] ?? img['compass_angle'] ?? 0
-          ),
-          isPano: Boolean(img['is_pano']),
-          sequenceId: img['sequence'] ? String(img['sequence']) : null,
-          provider: 'mapillary',
-        });
-      }
-      return results;
-    });
-  }
-
-  private async getMapillaryImage(
-    imageId: string,
-    heading: number,
-    pitch: number
-  ): Promise<RenderedImageResult | null> {
-    try {
-      const cacheKey = `mapillary_hd:${imageId}`;
-      let decoded = this.cropService.getCached(cacheKey);
-
-      if (decoded) {
-        queryAudit.recordCacheHit('mapillary_image');
-      } else {
-        const metaKey = `mapillary:${imageId}`;
-        const metaCached = metadataCache.get(metaKey) as LocationMetadata | undefined;
-        let thumbUrl: string | null | undefined;
-        let imgHeading = 0;
-        let isPano = false;
-
-        if (metaCached?.thumbUrl) {
-          queryAudit.recordCacheHit('mapillary_meta');
-          thumbUrl = metaCached.thumbUrl;
-          imgHeading = Number(metaCached.heading || 0);
-          isPano = Boolean(metaCached.isPano);
-        } else {
-          const token = this.ensureMapillaryToken();
-          queryAudit.recordExternal('mapillary_meta', String(imageId));
-          const url = new URL(
-            `${DEFAULT_MAPILLARY_BASE_URL}/${encodeURIComponent(imageId)}`
-          );
-          url.searchParams.set('access_token', token);
-          url.searchParams.set(
-            'fields',
-            'compass_angle,computed_compass_angle,thumb_original_url,thumb_2048_url,is_pano'
-          );
-          const resp = await fetch(url.toString());
-          if (!resp.ok) return null;
-          const data = await resp.json();
-          imgHeading = Number(
-            data?.computed_compass_angle ?? data?.compass_angle ?? 0
-          );
-          thumbUrl = data?.thumb_original_url || data?.thumb_2048_url;
-          isPano = Boolean(data?.is_pano);
-        }
-
-        if (!thumbUrl) return null;
-        queryAudit.recordExternal('mapillary_image', String(imageId));
-        const imgResp = await fetch(thumbUrl);
-        if (!imgResp.ok) return null;
-        const blob = await imgResp.blob();
-        if (!blob || blob.size === 0) return null;
-        decoded = await this.cropService.decodeAndCache(
-          cacheKey,
-          blob,
-          imgHeading,
-          isPano
+        throw new Error(
+          `${plugin.name} imagery service error (HTTP ${resp.status})`
         );
       }
 
-      if (decoded.isPano) {
-        const cropped = this.cropService.cropPanorama(
-          decoded,
-          heading,
-          this.defaultFov,
-          960,
-          720,
-          pitch
-        );
-        return {
-          image: cropped,
-          imageId,
-          actualHeading: heading,
-        };
-      }
-      return {
-        image: decoded.rawBase64,
-        imageId,
-        actualHeading: decoded.imgHeading,
-      };
-    } catch {
-      return null;
-    }
-  }
-
-  // =====================================================================
-  // Panoramax STAC API Client
-  // =====================================================================
-
-  private get panoramaxBaseUrl(): string {
-    return (this.config.panoramaxBaseUrl() || DEFAULT_PANORAMAX_BASE_URL).replace(
-      /\/+$/,
-      ''
-    );
-  }
-
-  private parsePanoramaxFeature(
-    feat: Record<string, unknown>,
-    cacheMeta: boolean = false
-  ): LocationMetadata | null {
-    if (!feat || typeof feat !== 'object') return null;
-    const imageId = feat['id'];
-    const geom = feat['geometry'] as { coordinates?: number[] } | undefined;
-    const coords = geom?.coordinates;
-    if (!imageId || !Array.isArray(coords) || coords.length < 2) return null;
-
-    const props = (feat['properties'] as Record<string, unknown>) || {};
-    const orient =
-      (props['pers:interior_orientation'] as Record<string, unknown>) || {};
-    const fov = orient['field_of_view'];
-    let isPano = false;
-    if (fov !== undefined && fov !== null) {
-      const parsedFov = Number(fov);
-      isPano = !Number.isNaN(parsedFov) && parsedFov >= 360;
-    } else {
-      const dims = orient['sensor_array_dimensions'];
-      if (Array.isArray(dims) && dims.length === 2 && dims[1]) {
-        isPano = Math.abs(Number(dims[0]) / Number(dims[1]) - 2.0) < 0.15;
-      }
-    }
-
-    const heading = Number(props['view:azimuth'] ?? 0);
-    const captureTime = isoToEpochMs(
-      props['datetime'] || props['datetimetz'] || ''
-    );
-    const seqId = feat['collection'] ? String(feat['collection']) : null;
-
-    const assets = (feat['assets'] as Record<string, { href?: string }>) || {};
-    const thumbUrl =
-      assets['sd']?.href ||
-      assets['hd']?.href ||
-      (props['geovisio:image'] as string | undefined) ||
-      assets['thumb']?.href ||
-      null;
-
-    let prevId: string | null = null;
-    let nextId: string | null = null;
-    const links = Array.isArray(feat['links']) ? feat['links'] : [];
-    for (const link of links) {
-      if (link && typeof link === 'object') {
-        const rel = (link as Record<string, unknown>)['rel'];
-        const lid = (link as Record<string, unknown>)['id'];
-        if (rel === 'prev' && lid) prevId = String(lid);
-        else if (rel === 'next' && lid) nextId = String(lid);
-      }
-    }
-
-    const meta: LocationMetadata = {
-      imageId: String(imageId),
-      coordinates: { latitude: Number(coords[1]), longitude: Number(coords[0]) },
-      captureTime,
-      heading,
-      isPano,
-      sequenceId: seqId,
-      thumbUrl,
-      prevImageId: prevId,
-      nextImageId: nextId,
-      provider: 'panoramax',
-    };
-
-    if (this.panoramaxMemMeta.size >= 4096) {
-      this.panoramaxMemMeta.clear();
-    }
-    this.panoramaxMemMeta.set(meta.imageId, meta);
-    if (cacheMeta) {
-      metadataCache.put(`panoramax:${meta.imageId}`, meta);
-    }
-    return meta;
-  }
-
-  private async getPanoramaxMetadata(
-    imageId: string
-  ): Promise<LocationMetadata | null> {
-    const idStr = String(imageId);
-    const mem = this.panoramaxMemMeta.get(idStr);
-    if (mem) {
-      queryAudit.recordCacheHit('panoramax_meta');
-      return mem;
-    }
-    const cached = metadataCache.get(`panoramax:${idStr}`) as
-      | LocationMetadata
-      | undefined;
-    if (cached) {
-      queryAudit.recordCacheHit('panoramax_meta');
-      this.panoramaxMemMeta.set(idStr, cached);
-      return cached;
-    }
-
-    try {
-      queryAudit.recordExternal('panoramax_meta', idStr);
-      const url = new URL(`${this.panoramaxBaseUrl}/search`);
-      url.searchParams.set('ids', idStr);
-      url.searchParams.set('limit', '1');
-      const resp = await fetch(url.toString());
-      if (!resp.ok) return null;
-      const payload = await resp.json();
-      const features = Array.isArray(payload?.features) ? payload.features : [];
-      if (features.length > 0) {
-        return this.parsePanoramaxFeature(features[0], true);
-      }
-    } catch {
-      return null;
-    }
-    return null;
-  }
-
-  private async getPanoramaxSequence(
-    sequenceId: string
-  ): Promise<LocationMetadata[]> {
-    if (!sequenceId) return [];
-    const seqStr = String(sequenceId);
-    const seqKey = `panoramax:seq:${seqStr}`;
-    const cached = windowCache.get(seqKey) as LocationMetadata[] | undefined;
-    if (cached) {
-      queryAudit.recordCacheHit('panoramax_seq');
-      return cached;
-    }
-
-    return singleflight(`panoramax_seq:${this.panosOnly}:${seqStr}`, async () => {
-      const again = windowCache.get(seqKey) as LocationMetadata[] | undefined;
-      if (again) {
-        queryAudit.recordCacheHit('panoramax_seq');
-        return again;
-      }
-
-      queryAudit.recordExternal('panoramax_seq', seqStr);
-      try {
-        const url = new URL(
-          `${this.panoramaxBaseUrl}/collections/${encodeURIComponent(seqStr)}/items`
-        );
-        url.searchParams.set('limit', '500');
-        const resp = await fetch(url.toString());
-        if (!resp.ok) return [];
-        const payload = await resp.json();
-        const features = Array.isArray(payload?.features)
-          ? payload.features
-          : [];
-
-        const results: LocationMetadata[] = [];
-        const seen = new Set<string>();
-        for (const feat of features) {
-          const meta = this.parsePanoramaxFeature(feat);
-          if (!meta || seen.has(meta.imageId)) continue;
-          if (this.panosOnly && !meta.isPano) continue;
-          seen.add(meta.imageId);
-          results.push(meta);
-        }
-        windowCache.put(seqKey, results);
-        return results;
-      } catch {
-        return [];
-      }
-    });
-  }
-
-  private async getPanoramaxMetadataBbox(
-    minLat: number,
-    minLng: number,
-    maxLat: number,
-    maxLng: number
-  ): Promise<LocationMetadata[]> {
-    const bboxStr = `${minLng},${minLat},${maxLng},${maxLat}`;
-    const sfKey = `panoramax_bbox:${this.panosOnly}:${minLng.toFixed(6)},${minLat.toFixed(6)},${maxLng.toFixed(6)},${maxLat.toFixed(6)}`;
-
-    return singleflight(sfKey, async () => {
-      const url = new URL(`${this.panoramaxBaseUrl}/search`);
-      url.searchParams.set('bbox', bboxStr);
-      url.searchParams.set('limit', '500');
-      if (this.panosOnly) {
-        url.searchParams.set('filter', 'field_of_view=360');
-      }
-
-      queryAudit.recordExternal(
-        'panoramax_bbox',
-        `${minLat.toFixed(5)},${minLng.toFixed(5)},${maxLat.toFixed(5)},${maxLng.toFixed(5)}`
-      );
-      const resp = await fetch(url.toString());
-      if (!resp.ok) {
-        throw new Error(`Panoramax imagery service error (HTTP ${resp.status})`);
-      }
-
-      const payload = await resp.json();
-      let features: Record<string, unknown>[] = Array.isArray(payload?.features)
-        ? payload.features
-        : [];
-
-      if (features.length === 0 && this.panosOnly) {
+      let items = this.extractItems(payload, plugin.itemsPath);
+      if (
+        items.length === 0 &&
+        this.panosOnly &&
+        url.includes('filter=field_of_view')
+      ) {
         try {
-          const fbUrl = new URL(`${this.panoramaxBaseUrl}/search`);
-          fbUrl.searchParams.set('bbox', bboxStr);
-          fbUrl.searchParams.set('limit', '500');
-          const fbResp = await fetch(fbUrl.toString());
+          const fbUrl = url.replace(/[?&]filter=field_of_view[^&]*/, '');
+          const fbResp = await fetch(fbUrl);
           if (fbResp.ok) {
             const fbPayload = await fbResp.json();
-            features = Array.isArray(fbPayload?.features)
-              ? fbPayload.features
-              : [];
+            items = this.extractItems(fbPayload, plugin.itemsPath);
           }
         } catch {
           // Ignore flat fallback error
@@ -611,8 +298,8 @@ export class ImageryProviderService implements ImageryProviderClient {
 
       const results: LocationMetadata[] = [];
       const seen = new Set<string>();
-      for (const feat of features) {
-        const meta = this.parsePanoramaxFeature(feat);
+      for (const item of items) {
+        const meta = this.parsePluginItem(plugin, item);
         if (!meta || seen.has(meta.imageId)) continue;
         seen.add(meta.imageId);
         results.push(meta);
@@ -621,22 +308,36 @@ export class ImageryProviderService implements ImageryProviderClient {
     });
   }
 
-  private async getPanoramaxImage(
+  async getImage(
     imageId: string,
-    heading: number,
-    pitch: number
+    heading: number = 0,
+    pitch: number = 0
   ): Promise<RenderedImageResult | null> {
+    const plugin = this.getActivePlugin();
+    const rawId = normalizeRawImageId(imageId);
+    if (!rawId) return null;
+
+    if (plugin.imageFormat === 'single') {
+      return this.fetchDirectionalSingleImage(
+        plugin,
+        rawId,
+        imageId,
+        heading,
+        pitch
+      );
+    }
+
     try {
-      const cacheKey = `panoramax_hd:${imageId}`;
+      const cacheKey = `${plugin.name}_hd:${rawId}`;
       let decoded = this.cropService.getCached(cacheKey);
 
       if (decoded) {
-        queryAudit.recordCacheHit('panoramax_image');
+        queryAudit.recordCacheHit(`${plugin.name}_image`);
       } else {
-        const meta = await this.getPanoramaxMetadata(imageId);
+        const meta = await this.getMetadata(rawId);
         if (!meta?.thumbUrl) return null;
 
-        queryAudit.recordExternal('panoramax_image', String(imageId));
+        queryAudit.recordExternal(`${plugin.name}_image`, rawId);
         const imgResp = await fetch(meta.thumbUrl);
         if (!imgResp.ok) return null;
         const blob = await imgResp.blob();
@@ -672,5 +373,460 @@ export class ImageryProviderService implements ImageryProviderClient {
     } catch {
       return null;
     }
+  }
+
+  // =====================================================================
+  // Generic Point-Sampling Mode (`retrieval_type = image`)
+  // =====================================================================
+
+  private async fetchPointMetadata(
+    plugin: ImageryPluginConfig,
+    lat: number,
+    lng: number,
+    radiusM: number = 25
+  ): Promise<LocationMetadata | null> {
+    if (!plugin.pointUrl) return null;
+    const locKey = `${plugin.name}_pt:${lat.toFixed(5)},${lng.toFixed(5)},${Math.round(radiusM)}`;
+    return singleflight(locKey, async () => {
+      try {
+        const apiKey = this.ensurePluginKey(plugin);
+        const url = interpolateUrlTemplate(plugin.pointUrl!, {
+          lat,
+          lng,
+          radius: Math.round(radiusM),
+          apiKey,
+        });
+        queryAudit.recordExternal(
+          `${plugin.name}_point_meta`,
+          `${lat.toFixed(5)},${lng.toFixed(5)}`
+        );
+        const resp = await fetch(url);
+        if (!resp.ok) return null;
+        const payload = await resp.json();
+        const items = this.extractItems(payload, plugin.itemsPath);
+        if (items.length === 0) return null;
+        return this.parsePluginItem(plugin, items[0], true);
+      } catch {
+        return null;
+      }
+    });
+  }
+
+  private async getPointSampledBbox(
+    plugin: ImageryPluginConfig,
+    minLat: number,
+    minLng: number,
+    maxLat: number,
+    maxLng: number
+  ): Promise<LocationMetadata[]> {
+    const cLat = (minLat + maxLat) * 0.5;
+    const cLng = (minLng + maxLng) * 0.5;
+    const radiusM = Math.max(
+      15,
+      Math.min(
+        50,
+        Math.round(calculateDistance(minLat, minLng, maxLat, maxLng) * 0.5)
+      )
+    );
+
+    this.pendingJunctionCount++;
+    let centerMeta: LocationMetadata | null = null;
+    try {
+      centerMeta = await this.fetchPointMetadata(plugin, cLat, cLng, radiusM);
+      if (centerMeta) {
+        this.knownJunctions.set(centerMeta.imageId, centerMeta);
+      }
+    } finally {
+      this.pendingJunctionCount--;
+      if (this.pendingJunctionCount === 0) {
+        const waiters = this.batchWaiters.splice(0, this.batchWaiters.length);
+        for (const w of waiters) w();
+      }
+    }
+
+    if (!centerMeta) return [];
+
+    await this.waitForCurrentJunctionBatch();
+
+    const myId = centerMeta.imageId;
+    const results: LocationMetadata[] = [];
+
+    for (const other of this.knownJunctions.values()) {
+      if (other.imageId === myId) continue;
+      const dist = calculateDistance(
+        centerMeta.coordinates.latitude,
+        centerMeta.coordinates.longitude,
+        other.coordinates.latitude,
+        other.coordinates.longitude
+      );
+      if (dist > 600.0) continue;
+
+      const [metaLo, metaHi] =
+        myId.localeCompare(other.imageId) <= 0
+          ? [centerMeta, other]
+          : [other, centerMeta];
+
+      const seqId = `${plugin.name}_seq_${metaLo.imageId}__${metaHi.imageId}`;
+      const [startStub, endStub] = this.buildPairEndpointStubs(
+        plugin.name,
+        metaLo,
+        metaHi,
+        seqId
+      );
+      results.push(startStub, endStub);
+    }
+
+    if (results.length === 0) {
+      results.push({
+        ...centerMeta,
+        sequenceId: `${plugin.name}_probe_${myId}`,
+      });
+    }
+
+    return results;
+  }
+
+  private async getPointSampledSequence(
+    plugin: ImageryPluginConfig,
+    seqStr: string
+  ): Promise<LocationMetadata[]> {
+    const cacheKey = `${plugin.name}:seq:${seqStr}`;
+    const cached = windowCache.get(cacheKey) as LocationMetadata[] | undefined;
+    if (cached) {
+      queryAudit.recordCacheHit(`${plugin.name}_seq`);
+      return cached;
+    }
+
+    return singleflight(`${plugin.name}_seq:${seqStr}`, async () => {
+      const again = windowCache.get(cacheKey) as LocationMetadata[] | undefined;
+      if (again) {
+        queryAudit.recordCacheHit(`${plugin.name}_seq`);
+        return again;
+      }
+
+      const prefix = `${plugin.name}_seq_`;
+      if (!seqStr.startsWith(prefix)) return [];
+
+      const rawPair = seqStr.slice(prefix.length);
+      const sepIdx = rawPair.indexOf('__');
+      if (sepIdx <= 0) return [];
+
+      const idLo = rawPair.slice(0, sepIdx);
+      const idHi = rawPair.slice(sepIdx + 2);
+      if (!idLo || !idHi) return [];
+
+      const [metaLo, metaHi] = await Promise.all([
+        this.knownJunctions.get(idLo) ?? this.getMetadata(idLo),
+        this.knownJunctions.get(idHi) ?? this.getMetadata(idHi),
+      ]);
+      if (!metaLo || !metaHi) return [];
+
+      const [startStub, endStub] = this.buildPairEndpointStubs(
+        plugin.name,
+        metaLo,
+        metaHi,
+        seqStr
+      );
+
+      const lat1 = metaLo.coordinates.latitude;
+      const lng1 = metaLo.coordinates.longitude;
+      const lat2 = metaHi.coordinates.latitude;
+      const lng2 = metaHi.coordinates.longitude;
+      const totalDist = calculateDistance(lat1, lng1, lat2, lng2);
+
+      const intermediates: LocationMetadata[] = [];
+      if (totalDist > 24.0) {
+        const nSteps = Math.max(2, Math.ceil(totalDist / 16.0));
+        const sampleCoords: Array<{ lat: number; lng: number }> = [];
+        for (let k = 1; k < nSteps; k++) {
+          const frac = k / nSteps;
+          sampleCoords.push({
+            lat: lat1 + (lat2 - lat1) * frac,
+            lng: lng1 + (lng2 - lng1) * frac,
+          });
+        }
+
+        const sampled = await Promise.all(
+          sampleCoords.map((pt) =>
+            this.fetchPointMetadata(plugin, pt.lat, pt.lng, 22)
+          )
+        );
+
+        const seenIds = new Set<string>([
+          normalizeRawImageId(metaLo.imageId),
+          normalizeRawImageId(metaHi.imageId),
+        ]);
+        let prevLat = lat1;
+        let prevLng = lng1;
+
+        for (const m of sampled) {
+          if (!m) continue;
+          const rawMidId = normalizeRawImageId(m.imageId);
+          if (seenIds.has(rawMidId)) continue;
+          const dPrev = calculateDistance(
+            prevLat,
+            prevLng,
+            m.coordinates.latitude,
+            m.coordinates.longitude
+          );
+          const dEnd = calculateDistance(
+            m.coordinates.latitude,
+            m.coordinates.longitude,
+            lat2,
+            lng2
+          );
+          if (dPrev < 4.0 || dEnd < 4.0 || dPrev > 29.0) continue;
+
+          seenIds.add(rawMidId);
+          intermediates.push(m);
+          prevLat = m.coordinates.latitude;
+          prevLng = m.coordinates.longitude;
+        }
+      }
+
+      const baseEpochMs = 1700000000000;
+      const chain: LocationMetadata[] = [startStub];
+
+      for (let i = 0; i < intermediates.length; i++) {
+        const m = intermediates[i];
+        const nextPt =
+          i + 1 < intermediates.length
+            ? intermediates[i + 1].coordinates
+            : metaHi.coordinates;
+        const brg = compassBearingLocal(
+          m.coordinates.latitude,
+          m.coordinates.longitude,
+          nextPt.latitude,
+          nextPt.longitude
+        );
+        const rawMidId = normalizeRawImageId(m.imageId);
+        chain.push({
+          ...m,
+          imageId: `${rawMidId}@${seqStr}`,
+          heading: m.heading || brg,
+          captureTime: String(baseEpochMs + (i + 1) * 1000),
+          sequenceId: seqStr,
+          isPano: true,
+          provider: plugin.name,
+        });
+      }
+
+      chain.push(endStub);
+      windowCache.put(cacheKey, chain);
+      return chain;
+    });
+  }
+
+  private buildPairEndpointStubs(
+    providerName: string,
+    metaLo: LocationMetadata,
+    metaHi: LocationMetadata,
+    seqId: string
+  ): [LocationMetadata, LocationMetadata] {
+    const rawLo = normalizeRawImageId(metaLo.imageId);
+    const rawHi = normalizeRawImageId(metaHi.imageId);
+    const brgLoToHi = compassBearingLocal(
+      metaLo.coordinates.latitude,
+      metaLo.coordinates.longitude,
+      metaHi.coordinates.latitude,
+      metaHi.coordinates.longitude
+    );
+
+    const startStub: LocationMetadata = {
+      ...metaLo,
+      imageId: `${rawLo}@${seqId}:0`,
+      coordinates: metaLo.coordinates,
+      heading: brgLoToHi,
+      captureTime: '1700000000000',
+      sequenceId: seqId,
+      isPano: true,
+      provider: providerName,
+    };
+
+    const endStub: LocationMetadata = {
+      ...metaHi,
+      imageId: `${rawHi}@${seqId}:1`,
+      coordinates: metaHi.coordinates,
+      heading: brgLoToHi,
+      captureTime: '1700000999000',
+      sequenceId: seqId,
+      isPano: true,
+      provider: providerName,
+    };
+
+    return [startStub, endStub];
+  }
+
+  private waitForCurrentJunctionBatch(): Promise<void> {
+    if (this.pendingJunctionCount === 0) {
+      return new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    return new Promise((resolve) => {
+      this.batchWaiters.push(resolve);
+    });
+  }
+
+  private async fetchDirectionalSingleImage(
+    plugin: ImageryPluginConfig,
+    rawId: string,
+    originalImageId: string,
+    heading: number,
+    pitch: number
+  ): Promise<RenderedImageResult | null> {
+    if (!plugin.imageUrl) return null;
+    try {
+      const apiKey = this.ensurePluginKey(plugin);
+      const url = interpolateUrlTemplate(plugin.imageUrl, {
+        imageId: rawId,
+        heading: ((heading % 360) + 360) % 360,
+        pitch,
+        fov: 90,
+        width: 960,
+        height: 720,
+        apiKey,
+      });
+      queryAudit.recordExternal(`${plugin.name}_image`, rawId);
+      const resp = await fetch(url);
+      if (!resp.ok) return null;
+      const blob = await resp.blob();
+      if (!blob || blob.size === 0) return null;
+      const base64 = await this.blobToBase64(blob);
+      return {
+        image: base64,
+        imageId: originalImageId,
+        actualHeading: heading,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private blobToBase64(blob: Blob): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const res = String(reader.result || '');
+        const comma = res.indexOf(',');
+        resolve(comma >= 0 ? res.slice(comma + 1) : res);
+      };
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  // =====================================================================
+  // Generic JSON Field Extraction & Normalization
+  // =====================================================================
+
+  private extractItems(
+    payload: unknown,
+    itemsPath: string
+  ): Record<string, unknown>[] {
+    if (!payload || typeof payload !== 'object') return [];
+    if (Array.isArray(payload)) {
+      return payload as Record<string, unknown>[];
+    }
+    if (!itemsPath) {
+      return [payload as Record<string, unknown>];
+    }
+    const extracted = getFieldByPath(payload, [itemsPath]);
+    if (Array.isArray(extracted)) {
+      return extracted as Record<string, unknown>[];
+    }
+    if (extracted && typeof extracted === 'object') {
+      return [extracted as Record<string, unknown>];
+    }
+    return [payload as Record<string, unknown>];
+  }
+
+  private parsePluginItem(
+    plugin: ImageryPluginConfig,
+    item: Record<string, unknown>,
+    cacheMeta: boolean = false,
+    fallbackSeqId?: string
+  ): LocationMetadata | null {
+    if (!item || typeof item !== 'object') return null;
+
+    const rawId = getFieldByPath(item, plugin.idField);
+    const rawLat = getFieldByPath(item, plugin.latField);
+    const rawLng = getFieldByPath(item, plugin.lngField);
+    if (rawId === undefined || rawLat === undefined || rawLng === undefined) {
+      return null;
+    }
+
+    const lat = Number(rawLat);
+    const lng = Number(rawLng);
+    if (Number.isNaN(lat) || Number.isNaN(lng)) return null;
+
+    const rawHeading = getFieldByPath(item, plugin.headingField);
+    const heading = rawHeading !== undefined ? Number(rawHeading) : 0;
+
+    const rawCaptureTime = getFieldByPath(item, plugin.captureTimeField);
+    const captureTime = normalizeEpochMs(rawCaptureTime);
+
+    const rawSeq = getFieldByPath(item, plugin.sequenceField);
+    const seqId =
+      rawSeq !== undefined && rawSeq !== null
+        ? String(rawSeq)
+        : (fallbackSeqId ?? null);
+
+    let isPano = true;
+    if (plugin.isPanoField.length > 0) {
+      const rawIsPano = getFieldByPath(item, plugin.isPanoField);
+      isPano = Boolean(rawIsPano);
+    } else if (
+      plugin.fovField.length > 0 ||
+      plugin.dimensionsField.length > 0
+    ) {
+      isPano = false;
+      const fov = getFieldByPath(item, plugin.fovField);
+      if (fov !== undefined && fov !== null) {
+        const parsedFov = Number(fov);
+        isPano = !Number.isNaN(parsedFov) && parsedFov >= 360;
+      } else {
+        const dims = getFieldByPath(item, plugin.dimensionsField);
+        if (Array.isArray(dims) && dims.length === 2 && dims[1]) {
+          isPano = Math.abs(Number(dims[0]) / Number(dims[1]) - 2.0) < 0.15;
+        }
+      }
+    }
+
+    const rawThumb = getFieldByPath(item, plugin.thumbUrlField);
+    const thumbUrl = rawThumb ? String(rawThumb) : null;
+
+    let prevId: string | null = null;
+    let nextId: string | null = null;
+    const links = Array.isArray(item['links']) ? item['links'] : [];
+    for (const link of links) {
+      if (link && typeof link === 'object') {
+        const rel = (link as Record<string, unknown>)['rel'];
+        const lid = (link as Record<string, unknown>)['id'];
+        if (rel === 'prev' && lid) prevId = String(lid);
+        else if (rel === 'next' && lid) nextId = String(lid);
+      }
+    }
+
+    const meta: LocationMetadata = {
+      imageId: String(rawId),
+      coordinates: { latitude: lat, longitude: lng },
+      captureTime,
+      heading: Number.isNaN(heading) ? 0 : heading,
+      isPano,
+      sequenceId: seqId,
+      thumbUrl,
+      prevImageId: prevId,
+      nextImageId: nextId,
+      provider: plugin.name,
+    };
+
+    const metaKey = `${plugin.name}:${meta.imageId}`;
+    if (this.memMeta.size >= 4096) {
+      this.memMeta.clear();
+    }
+    this.memMeta.set(metaKey, meta);
+    if (cacheMeta) {
+      metadataCache.put(metaKey, meta);
+    }
+    return meta;
   }
 }

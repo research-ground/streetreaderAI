@@ -1,0 +1,110 @@
+# ============================================================================
+# StreetReaderAI System Configuration (streetreaderai.conf)
+# ============================================================================
+# Copy this file to `streetreaderai.conf` (which is git-ignored) and set your
+# API keys and active providers below.
+# In Google AI Studio, GEMINI_API_KEY is injected automatically by the host.
+
+[system]
+imagery_provider = panoramax
+location_provider = osm
+ai_provider = gemini
+starting_address = 601 N 34th St, Seattle, WA
+max_poi_items = 3
+
+[keys]
+gemini_api_key =
+openai_api_key =
+mapillary_token =
+google_maps_api_key =
+
+# ============================================================================
+# Imagery Provider Plugins
+#   retrieval_type = sequence | image
+#     - sequence : discovers imagery via `bbox_url` and expands sequences via `sequence_url`
+#     - image    : queries individual images near coordinates via `point_url` and samples along blocks
+#   image_format   = 360 | single
+#     - 360      : downloads a 360° equirectangular panorama (`thumb_url_field`) and crops in-browser
+#     - single   : downloads a directional viewport (`image_url`) pre-cropped for {heading} and {pitch}
+# ============================================================================
+
+[imagery.panoramax]
+retrieval_type = sequence
+image_format = 360
+bbox_url = https://api.panoramax.xyz/api/search?bbox={minLng},{minLat},{maxLng},{maxLat}&limit=500&filter=field_of_view=360
+sequence_url = https://api.panoramax.xyz/api/collections/{sequenceId}/items?limit=500
+metadata_url = https://api.panoramax.xyz/api/search?ids={imageId}&limit=1
+items_path = features
+id_field = id
+lat_field = geometry.coordinates.1
+lng_field = geometry.coordinates.0
+heading_field = properties.view:azimuth
+capture_time_field = properties.datetime, properties.datetimetz
+sequence_field = collection
+fov_field = properties.pers:interior_orientation.field_of_view
+dimensions_field = properties.pers:interior_orientation.sensor_array_dimensions
+thumb_url_field = assets.sd.href, assets.hd.href, properties.geovisio:image, assets.thumb.href
+
+[imagery.mapillary]
+retrieval_type = sequence
+image_format = 360
+requires_key = mapillary_token
+bbox_url = https://graph.mapillary.com/images?access_token={apiKey}&bbox={minLng},{minLat},{maxLng},{maxLat}&fields=id,geometry,compass_angle,computed_compass_angle,captured_at,is_pano,sequence&limit=500&is_pano=true
+sequence_url = https://graph.mapillary.com/images?access_token={apiKey}&sequence_ids={sequenceId}&fields=id,geometry,compass_angle,computed_compass_angle,captured_at,is_pano,sequence&limit=500&is_pano=true
+metadata_url = https://graph.mapillary.com/{imageId}?access_token={apiKey}&fields=id,geometry,compass_angle,computed_compass_angle,captured_at,is_pano,sequence,thumb_original_url,thumb_2048_url
+items_path = data
+id_field = id
+lat_field = geometry.coordinates.1
+lng_field = geometry.coordinates.0
+heading_field = computed_compass_angle, compass_angle
+capture_time_field = captured_at
+sequence_field = sequence
+is_pano_field = is_pano
+thumb_url_field = thumb_original_url, thumb_2048_url
+
+# ============================================================================
+# Location & Geocoding Provider Plugins
+# ============================================================================
+
+[location.osm]
+geocode_url = https://nominatim.openstreetmap.org/search?q={address}&format=json&limit=1&addressdetails=1
+reverse_geocode_url = https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lng}&format=json
+autocomplete_url = https://nominatim.openstreetmap.org/search?q={query}&format=json&limit=5
+items_path =
+lat_field = lat
+lng_field = lon
+address_field = display_name
+street_field = address.road, address.pedestrian
+place_id_field = place_id
+
+[location.google]
+requires_key = google_maps_api_key
+geocode_url = https://maps.googleapis.com/maps/api/geocode/json?address={address}&key={apiKey}
+reverse_geocode_url = https://maps.googleapis.com/maps/api/geocode/json?latlng={lat},{lng}&key={apiKey}
+autocomplete_url = https://places.googleapis.com/v1/places:autocomplete
+nearby_url = https://places.googleapis.com/v1/places:searchNearby
+items_path = results
+status_field = status
+status_ok_value = OK
+lat_field = geometry.location.lat
+lng_field = geometry.location.lng
+address_field = formatted_address
+street_field =
+place_id_field = place_id
+
+# ============================================================================
+# AI Vision Provider Plugins
+#   wire_format = gemini | openai
+# ============================================================================
+
+[ai.gemini]
+requires_key = gemini_api_key
+wire_format = gemini
+model_id = gemini-3.8-flash
+endpoint_url = https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={apiKey}
+
+[ai.openai]
+requires_key = openai_api_key
+wire_format = openai
+model_id = gpt-5.6-terra
+endpoint_url = https://api.openai.com/v1/chat/completions
