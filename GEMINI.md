@@ -15,7 +15,7 @@ Welcome! As an AI development assistant (Gemini, Antigravity, Jetski, etc.) work
 ## 2. Environment & Runtime Expectations
 
 ### 🖥️ Development Server
-* StreetReaderAI runs as a 100% client-side Angular SPA on port 4200 (`make start` / `cd client && npm start`).
+* StreetReaderAI runs as a 100% client-side Angular SPA at the repository root on port 4200 (`make start` / `npm start`).
 * If the dev server is not running when executing browser tools or interactive checks, spin it up in the background (`make start`) rather than asking the developer to manually launch it.
 
 ### 🔑 API & Security Guidelines
@@ -53,7 +53,7 @@ Welcome! As an AI development assistant (Gemini, Antigravity, Jetski, etc.) work
 ## 5. Local Setup & Testing Guidelines
 
 ### 🛠️ Setting Up The Repository
-* **Automated Setup**: Run `make setup` to install Node.js packages in `client/`.
+* **Automated Setup**: Run `make setup` (or `npm install`) to install Node.js packages at the repository root.
 * **Configuration**: External service providers and API keys are configured via the in-app Settings dialog (`localStorage`).
 
 ### 🧪 Running Tests

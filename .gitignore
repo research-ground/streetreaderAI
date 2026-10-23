@@ -1,25 +1,41 @@
-.DS_Store
+# Node
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Build output
 dist/
-*.zip
+tmp/
 /tmp/
-server/streetreaderai.conf
-__pycache__/
-*.pyc
-tests/*.log
-server/logs/
-server/venv/
-.venv/
-client/node_modules/
-.server_startup.log
+out-tsc/
+bazel-out/
+
+# Angular
+.angular/
+
+# Testing
+coverage/
+
+# Mac OS & IDEs
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
 .jetskicli/
 CLAUDE.md
 
-# Local OSM road extracts
+# Legacy artifacts & local data
+*.zip
 data/
-
-# Disk cache database
 .cache/
-server/.cache/
+server/
+tests/
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.server_startup.log
 *.db
 *.db-wal
 *.db-shm

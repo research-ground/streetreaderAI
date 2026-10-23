@@ -1,9 +1,9 @@
 # StreetReaderAI Routing & Imagery Architecture
 
 All routing, road-network extraction, sequence solving, and equirectangular projection run 100% client-side in the browser across three services:
-* [`client/src/app/services/route_provider_service.ts`](../client/src/app/services/route_provider_service.ts)
-* [`client/src/app/services/road_data_service.ts`](../client/src/app/services/road_data_service.ts)
-* [`client/src/app/services/panorama_crop_service.ts`](../client/src/app/services/panorama_crop_service.ts)
+* [`src/app/services/route_provider_service.ts`](../src/app/services/route_provider_service.ts)
+* [`src/app/services/road_data_service.ts`](../src/app/services/road_data_service.ts)
+* [`src/app/services/panorama_crop_service.ts`](../src/app/services/panorama_crop_service.ts)
 
 ---
 
@@ -64,7 +64,7 @@ Because StreetReaderAI runs directly in the browser against public OpenStreetMap
 
 ---
 
-## Radar Mini-Map (`client/src/app/components/radar_view/radar_view.ts`)
+## Radar Mini-Map (`src/app/components/radar_view/radar_view.ts`)
 
 The frontend displays a permanent, non-interactive (`aria-hidden="true"`, keyboard-safe) Street View–style radar mini-map in the bottom-right corner:
 - Queries `ApiService.getLocalGraph()` when the user moves to a new node.
@@ -75,5 +75,5 @@ The frontend displays a permanent, non-interactive (`aria-hidden="true"`, keyboa
 
 ## Testing (`make test`)
 
-* [`client/src/app/services/route_provider_service_test.ts`](../client/src/app/services/route_provider_service_test.ts): Offline unit tests for the 5-step sequence graph solver, OSM v0.6 POI extraction (`extractPoisFromOsmElements`), and zero-network-call tile reuse.
-* [`client/src/app/services/config_service_test.ts`](../client/src/app/services/config_service_test.ts): Unit tests for provider persistence, API key validation, and key-sharing proxy lock behavior.
+* [`src/app/services/route_provider_service_test.ts`](../src/app/services/route_provider_service_test.ts): Offline unit tests for the 5-step sequence graph solver, OSM v0.6 POI extraction (`extractPoisFromOsmElements`), and zero-network-call tile reuse.
+* [`src/app/services/config_service_test.ts`](../src/app/services/config_service_test.ts): Unit tests for provider persistence, API key validation, and key-sharing proxy lock behavior.

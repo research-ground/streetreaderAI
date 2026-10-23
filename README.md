@@ -121,9 +121,9 @@ StreetReaderAI is compatible with **Google AI Studio** and can run end-to-end on
 
 #### How to Import / Deploy in Google AI Studio
 1. Open [Google AI Studio](https://aistudio.google.com/) and go to **Build** (or **Apps** $\rightarrow$ **Create new app**).
-2. Import the **`client/`** folder from this repository (which contains `package.json`, `angular.json`, `metadata.json`, and `src/`):
-   * **Option A (Upload Folder / Zip)**: Upload the contents of the `client/` directory into a new AI Studio app.
-   * **Option B (GitHub Import)**: Connect your GitHub repository in AI Studio and point the app root to `client/`.
+2. Import this repository directly (since `package.json`, `angular.json`, `metadata.json`, and `src/` are at the repository root):
+   * **Option A (GitHub Import)**: Connect your GitHub repository directly in AI Studio.
+   * **Option B (Upload Folder / Zip)**: Upload the repository folder into a new AI Studio app.
 3. **Automatic Key Injection**:
    * When running inside the AI Studio preview environment, StreetReaderAI automatically detects the injected `process.env.GEMINI_API_KEY` (or `process.env.API_KEY`), pre-configures Google Gemini (`gemini-3.8-flash`), and uses an in-memory fallback (`safeStorage`) when running inside AI Studio's sandboxed iframe.
    * Keep **Street Imagery Provider** set to **Panoramax** and **Location & Geocoding Provider** set to **OpenStreetMap** in the First-Run dialog so that no Mapillary or Google Maps billing keys are needed.
@@ -136,7 +136,7 @@ StreetReaderAI is compatible with **Google AI Studio** and can run end-to-end on
 # Run unit tests (Vitest + Angular TestBed)
 make test
 
-# Build static production bundle into client/dist/StreetReaderAI/browser
+# Build static production bundle into dist/StreetReaderAI/browser
 make build
 ```
 

@@ -6,15 +6,15 @@ This document is the single authoritative reference for the StreetReaderAI clien
 
 ## Architecture Overview
 
-StreetReaderAI executes as a **100% client-side Angular SPA**. All navigation, road-graph solving, equirectangular panorama projection, geocoding, and AI vision calls are orchestrated in the browser through [`ApiService`](../client/src/app/services/api_service.ts), which delegates to:
+StreetReaderAI executes as a **100% client-side Angular SPA**. All navigation, road-graph solving, equirectangular panorama projection, geocoding, and AI vision calls are orchestrated in the browser through [`ApiService`](../src/app/services/api_service.ts), which delegates to:
 
-* [`RouteProviderService`](../client/src/app/services/route_provider_service.ts) — 5-step intersection + sequence-slice routing solver.
-* [`RoadDataService`](../client/src/app/services/road_data_service.ts) — OpenStreetMap v0.6 `/api/0.6/map.json` road network and POI extractor (with Overpass fallback).
-* [`ImageryProviderService`](../client/src/app/services/imagery_provider_service.ts) — Panoramax STAC API and Mapillary Graph API v4 client.
-* [`PanoramaCropService`](../client/src/app/services/panorama_crop_service.ts) — HTML5 `<canvas>` 360° equirectangular-to-rectilinear projection (`1440×1080`).
-* [`LocationProviderService`](../client/src/app/services/location_provider_service.ts) — Geocoding, reverse geocoding, autocomplete, and nearby POI search (OpenStreetMap Nominatim/Overpass or Google Maps Platform).
-* [`AiProviderService`](../client/src/app/services/ai_provider_service.ts) — Multimodal scene description and visual Q&A via Google Gemini (`gemini-3.8-flash`) or OpenAI (`gpt-5.6-terra`).
-* [`ConfigService`](../client/src/app/services/config_service.ts) — Runtime provider configuration, `safeStorage` persistence, environment key injection, and optional key-sharing proxy detection.
+* [`RouteProviderService`](../src/app/services/route_provider_service.ts) — 5-step intersection + sequence-slice routing solver.
+* [`RoadDataService`](../src/app/services/road_data_service.ts) — OpenStreetMap v0.6 `/api/0.6/map.json` road network and POI extractor (with Overpass fallback).
+* [`ImageryProviderService`](../src/app/services/imagery_provider_service.ts) — Panoramax STAC API and Mapillary Graph API v4 client.
+* [`PanoramaCropService`](../src/app/services/panorama_crop_service.ts) — HTML5 `<canvas>` 360° equirectangular-to-rectilinear projection (`1440×1080`).
+* [`LocationProviderService`](../src/app/services/location_provider_service.ts) — Geocoding, reverse geocoding, autocomplete, and nearby POI search (OpenStreetMap Nominatim/Overpass or Google Maps Platform).
+* [`AiProviderService`](../src/app/services/ai_provider_service.ts) — Multimodal scene description and visual Q&A via Google Gemini (`gemini-3.8-flash`) or OpenAI (`gpt-5.6-terra`).
+* [`ConfigService`](../src/app/services/config_service.ts) — Runtime provider configuration, `safeStorage` persistence, environment key injection, and optional key-sharing proxy detection.
 
 ---
 
