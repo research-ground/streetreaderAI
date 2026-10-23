@@ -37,55 +37,31 @@ While the original research prototype in the paper was built on Google Street Vi
 ## System Architecture
 
 ```text
-+---------------------------------------------------------------------------------------+
-|                          Browser: StreetReaderAI Angular SPA                          |
-|                                                                                       |
-|  +-----------------------+   +------------------------+   +------------------------+  |
-|  |   First-Run & UI      |   |   Navigation & State   |   |  Accessibility & Audio |  |
-|  |  - WelcomeDialog      |   |  - AppController       |   |  - SpeechOutputService |  |
-|  |    (API Key Gate)     |   |  - NavigationService   |   |  - SpeechInputService  |  |
-|  |  - SettingsDialog     |   |  - StateService        |   |  - HotkeyService       |  |
-|  |  - RadarView (SVG)    |   |  - StreetViewLinks     |   |  - Screen Curtain      |  |
-|  +-----------+-----------+   +-----------+------------+   +-----------+------------+  |
-|              |                           |                            |               |
-|              v                           v                            v               |
-|  +---------------------------------------------------------------------------------+  |
-|  |                          ApiService (In-Browser Facade)                         |  |
-|  +-----------------+---------------------------+--------------------------+--------+  |
-|                    |                           |                          |           |
-|                    v                           v                          v           |
-|  +-------------------------------+  +----------------------+  +--------------------+  |
-|  |     RouteProviderService      |  | LocationProviderSvc  |  |  AiProviderService |  |
-|  |  (5-Step Graph Solver)        |  | - Geocode / Reverse  |  | - describeImage()  |  |
-|  |  - RoadDataService (OSM v0.6) |  | - Autocomplete       |  | - askQuestion()    |  |
-|  |  - ImageryProviderService     |  | - Nearby POIs        |  |   + Nav Intent     |  |
-|  |  - PanoramaCropService        |  |   (Reuses OSM Tile)  |  |                    |  |
-|  |    (HTML5 Canvas 360 -> 2D)   |  +----------+-----------+  +---------+----------+  |
-|  +---------------+---------------+             |                        |             |
-|                  |                             |                        |             |
-|  +---------------+-----------------------------+------------------------+----------+  |
-|  |      Client LRU Cache (client_cache.ts) & SafeStorage (safe_storage.ts)         |  |
-|  +---------------+-----------------------------+------------------------+----------+  |
-+------------------|-----------------------------|------------------------|-------------+
-                   |                             |                        |
-                   | Direct HTTPS                | Direct HTTPS           | Direct HTTPS
-                   | (Zero Keys for              | (or via Optional       | (or via Optional
-                   |  OSM & Panoramax)           |  Key-Sharing Proxy)    |  Key-Sharing Proxy)
-                   v                             v                        v
-     +---------------------------+   +-----------------------+  +-----------------------+
-     |  Road & Street Imagery    |   | Geocoding & Places    |  |   Multimodal Vision   |
-     | - OpenStreetMap v0.6 API  |   | - OSM Nominatim       |  | - Google Gemini API   |
-     | - Overpass Mirrors        |   | - OSM Tile POI Cache  |  |   (gemini-3.8-flash)  |
-     | - Panoramax STAC API      |   | - Google Geocoding &  |  | - OpenAI Chat API     |
-     | - Mapillary Graph API v4  |   |   Places API v1       |  |   (gpt-5.6-terra)     |
-     +---------------------------+   +-----------+-----------+  +-----------+-----------+
-                                                 ^                          ^
-                                                 |                          |
-                                     +-----------+--------------------------+-----------+
-                                     |     Optional Key-Sharing Proxy (proxy/server)    |
-                                     |  - Shares GEMINI_API_KEY & GOOGLE_MAPS_API_KEY   |
-                                     |  - Locks those providers in the client UI        |
-                                     +--------------------------------------------------+
+                                 +----------------------------------------+
+                                 |   1. Street Imagery (360° Panoramas)   |
+                                 |   - Panoramax STAC API (Default, Open) |
+                                 |   - Mapillary Graph API v4 (Token)     |
+                                 +-------------------+--------------------+
+                                                     |
+                                                     | 360° Equirectangular Images
+                                                     | & Sequence Metadata
+                                                     v
++----------------------------------+     +-----------+------------+     +------------------------------------+
+| 2. Route & Road Network          |     |                        |     | 4. Vision-Language Model (VLM)     |
+| - OpenStreetMap v0.6 map.json    |---->|    StreetReaderAI      |<--->| - Google Gemini (gemini-3.8-flash) |
+| - Overpass API Mirrors (Fallback)|     |  (Browser Angular SPA) |     | - OpenAI (gpt-5.6-terra)           |
+|   (Intersections & Street Blocks)|     |                        |     |   (Scene Descriptions & Q&A)       |
++----------------------------------+     +-----------+------------+     +-----------------+------------------+
+                                                     ^                                    ^
+                                                     | Address Lookup,                    |
+                                                     | Autocomplete & POIs                | (Optional Key-Sharing
+                                                     v                                    |  for Gemini & Maps)
+                                 +-------------------+--------------------+               |
+                                 |   3. Geocoding & Nearby POIs           |     +---------+----------+
+                                 |   - OpenStreetMap Nominatim &          |<--->|   Optional Proxy   |
+                                 |     Cached OSM Tile POIs (Default)     |     | (proxy/server.mjs) |
+                                 |   - Google Geocoding & Places API v1   |     +--------------------+
+                                 +----------------------------------------+
 ```
 
 ---
