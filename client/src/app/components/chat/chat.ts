@@ -14,7 +14,7 @@
  limitations under the License.
  */
 
-import { Component, inject, computed, effect, ViewChild, ElementRef, AfterViewInit } from '@angular/core';
+import { Component, inject, computed, effect, ViewChild, ElementRef, AfterViewInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
@@ -24,30 +24,32 @@ import { ReactiveFormsModule, FormControl } from '@angular/forms';
 import { StateService } from '../../services/state_service';
 import { CommandService } from '../../services/command_service';
 import { SpeechInputService } from '../../services/speech_input_service';
+import { DemoModeService, DemoQuestion } from '../../demo_mode';
 import { Subscription } from 'rxjs';
 
 @Component({
   selector: 'app-chat',
   standalone: true,
   imports: [
-    CommonModule, 
-    MatFormFieldModule, 
-    MatInputModule, 
-    MatIconModule, 
-    MatButtonModule, 
-    ReactiveFormsModule
+    CommonModule,
+    MatFormFieldModule,
+    MatInputModule,
+    MatIconModule,
+    MatButtonModule,
+    ReactiveFormsModule,
   ],
   templateUrl: './chat.html',
   styleUrl: './chat.css',
 })
-export class ChatComponent implements AfterViewInit {
+export class ChatComponent implements AfterViewInit, OnDestroy {
   private stateService = inject(StateService);
   private commandService = inject(CommandService);
   protected speechInputService = inject(SpeechInputService);
-  
+  protected demoService = inject(DemoModeService);
+
   protected readonly chatControl = new FormControl('');
   private transcriptSub: Subscription;
-  
+
   @ViewChild('scrollContainer') private scrollContainer!: ElementRef;
 
   protected readonly isAsking = computed(() => {
@@ -55,19 +57,17 @@ export class ChatComponent implements AfterViewInit {
     if (history.length === 0) return false;
     return history[history.length - 1].role === 'user';
   });
-  
+
   protected readonly chatHistory = computed(() => this.stateService.state().chatHistory);
 
   constructor() {
-    this.transcriptSub = this.speechInputService.transcription$.subscribe(transcript => {
+    this.transcriptSub = this.speechInputService.transcription$.subscribe((transcript) => {
       this.chatControl.setValue(transcript);
       this.sendMessage();
     });
 
-    // Auto-scroll effect
     effect(() => {
-      // This will run whenever chatHistory() changes
-      this.chatHistory(); // Reference the signal to create the dependency
+      this.chatHistory();
       this.scrollToBottom();
     });
   }
@@ -89,6 +89,10 @@ export class ChatComponent implements AfterViewInit {
     }
   }
 
+  protected askSuggestedQuestion(q: DemoQuestion): void {
+    this.demoService.askQuestion(q);
+  }
+
   protected toggleListening() {
     if (this.speechInputService.listening()) {
       this.speechInputService.stopListening();
@@ -98,14 +102,13 @@ export class ChatComponent implements AfterViewInit {
   }
 
   private scrollToBottom(): void {
-    // We use a setTimeout to wait for the DOM to update with the new message
     setTimeout(() => {
       try {
         if (this.scrollContainer?.nativeElement) {
           this.scrollContainer.nativeElement.scrollTop = this.scrollContainer.nativeElement.scrollHeight;
         }
-      } catch(err) {
-        console.error("Error scrolling to bottom:", err);
+      } catch (err) {
+        console.error('Error scrolling to bottom:', err);
       }
     }, 0);
   }

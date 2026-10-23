@@ -125,7 +125,6 @@ class AppConfig(BaseModel):
     PANORAMAX_IMAGE_DOWNLOAD_TIMEOUT_S: float = Field(default_factory=lambda: _get_float_env("PANORAMAX_IMAGE_DOWNLOAD_TIMEOUT_S", 20.0))
 
     # Routing & Navigation Settings
-    ROUTE_LOCATE_MAX_PERP_M: float = Field(default_factory=lambda: _get_float_env("ROUTE_LOCATE_MAX_PERP_M", 60.0))
     ROUTE_SNAPSHOT_RADIUS_M: float = Field(default_factory=lambda: _get_float_env("ROUTE_SNAPSHOT_RADIUS_M", 350.0))
     DEMO_MODE: bool = Field(default_factory=lambda: _get_bool_env("DEMO_MODE", False))
 

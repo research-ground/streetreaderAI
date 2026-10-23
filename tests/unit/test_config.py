@@ -40,7 +40,6 @@ def test_config_default_fields():
     assert config.MAPILLARY_IMAGE_DOWNLOAD_TIMEOUT_S > 0
     assert config.PANORAMAX_METADATA_TIMEOUT_S > 0
     assert config.PANORAMAX_IMAGE_DOWNLOAD_TIMEOUT_S > 0
-    assert config.ROUTE_LOCATE_MAX_PERP_M > 0
     assert config.ROUTE_SNAPSHOT_RADIUS_M > 0
     assert config.NOMINATIM_BASE_URL.startswith("http")
     assert len(config.OVERPASS_ENDPOINTS) > 0

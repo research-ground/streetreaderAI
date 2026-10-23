@@ -14,6 +14,12 @@
  limitations under the License.
  */
 
+.navigation-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 .navigation-container {
   display: flex;
   align-items: center;
@@ -24,49 +30,91 @@
   flex: 1;
 }
 
-button {
+.go-btn {
   margin-left: 12px;
-  margin-bottom: 22px; /* To align with the center of the outline field */
+  margin-bottom: 22px;
 }
 
-.suggestions-box {
-  margin-top: 4px;
-}
-
-.suggestions-header {
-  font-size: 11px;
-  text-transform: uppercase;
-  color: #777;
-  letter-spacing: 0.5px;
-  margin-bottom: 4px;
-  font-weight: 500;
-}
-
-.suggestions-list {
+.demo-nav-container {
   display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.demo-hint {
+  font-size: 11.5px;
+  color: #475569;
+}
+
+.demo-location-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.demo-loc-btn {
+  display: flex;
+  align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
-}
-
-.suggestion-chip {
-  /* Reset button styles */
-  border: 1px solid #e0e0e0;
-  background-color: #fafafa;
-  font-family: inherit;
-  font-size: 12px;
-  padding: 6px 12px;
-  border-radius: 16px;
-  cursor: pointer;
-  transition: background-color 0.2s;
-  line-height: 1;
-
-  /* Remove default button margins */
+  width: 100%;
+  text-align: left;
+  padding: 6px 8px;
   margin: 0;
+  border-radius: 6px;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
 }
 
-.suggestion-chip:hover,
-.suggestion-chip:focus {
-  background-color: #f0f0f0;
-  outline: 2px solid #005fcc;
-  outline-offset: 1px;
+.demo-loc-btn:hover {
+  background: #eff6ff;
+  border-color: #60a5fa;
+}
+
+.demo-loc-btn.active {
+  background: #dbeafe;
+  border-color: #2563eb;
+}
+
+.key-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  background: #1e293b;
+  color: #ffffff;
+  font-family: monospace;
+  font-weight: 700;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.demo-loc-btn.active .key-badge {
+  background: #1d4ed8;
+}
+
+.loc-text {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.loc-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #0f172a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.loc-sub {
+  font-size: 11px;
+  color: #64748b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }

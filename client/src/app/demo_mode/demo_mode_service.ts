@@ -15,7 +15,7 @@
  */
 
 import { Injectable, computed, inject, signal } from '@angular/core';
-import { DEMO_LOCATIONS, DemoLocation, DemoQuestion } from './demo_config';
+import { DEMO_LOCATIONS, DemoLocation, DemoQuestion, GENERIC_QUESTIONS } from './demo_config';
 import { NavigationService } from '../services/navigation_service';
 import { StateService } from '../services/state_service';
 import { CommandService } from '../services/command_service';
@@ -33,15 +33,16 @@ export class DemoModeService {
   private appController = inject(AppController);
 
   readonly locations: DemoLocation[] = DEMO_LOCATIONS;
-  readonly enabled = signal<boolean>(this.readInitialFlag());
+  readonly enabled = signal<boolean>(true);
   readonly activeLocationIndex = signal<number>(0);
 
-  readonly activeLocation = computed<DemoLocation>(
-    () => this.locations[this.activeLocationIndex()] ?? this.locations[0]
-  );
+  readonly activeLocation = computed<DemoLocation | null>(() => {
+    const idx = this.activeLocationIndex();
+    return idx >= 0 && idx < this.locations.length ? this.locations[idx] : null;
+  });
 
   readonly activeQuestions = computed<DemoQuestion[]>(
-    () => this.activeLocation()?.questions ?? []
+    () => this.activeLocation()?.questions ?? GENERIC_QUESTIONS
   );
 
   private readonly boundKeyHandler = (event: KeyboardEvent) => this.onKeyDown(event);
@@ -50,23 +51,22 @@ export class DemoModeService {
     if (typeof window !== 'undefined') {
       window.addEventListener('keydown', this.boundKeyHandler);
     }
+    this.commandService.commands$.subscribe((cmd) => {
+      if (cmd.type === 'SEARCH_ADDRESS') {
+        const matchedIdx = this.locations.findIndex(
+          (l) => l.address.toLowerCase() === cmd.payload.trim().toLowerCase()
+        );
+        this.activeLocationIndex.set(matchedIdx);
+      }
+    });
   }
 
-  /** Applies the backend DEMO_MODE runtime config flag unless overridden in URL/localStorage. */
-  applyRuntimeConfig(serverDemoMode?: boolean): void {
-    if (this.hasClientOverride()) {
-      return;
-    }
-    if (typeof serverDemoMode === 'boolean') {
-      this.enabled.set(serverDemoMode);
-    }
+  applyRuntimeConfig(_serverDemoMode?: boolean): void {
+    this.enabled.set(true);
   }
 
   setEnabled(value: boolean): void {
     this.enabled.set(value);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('streetreader_demo_mode', value ? 'true' : 'false');
-    }
   }
 
   toggle(): void {
@@ -81,7 +81,7 @@ export class DemoModeService {
     this.appController.cancelOngoingTasks();
     this.speechOutputService.stop();
     this.appController.setTraveling();
-    this.toastService.show(`Demo [${loc.key}]: ${loc.title}`);
+    this.toastService.show(`Preset [${loc.key}]: ${loc.title}`);
     this.navigationService.loadCoordinates(loc.latitude, loc.longitude, loc.heading);
   }
 
@@ -90,7 +90,7 @@ export class DemoModeService {
       this.toastService.show('Still answering previous question...');
       return;
     }
-    this.toastService.show(`Demo [${q.key}]: ${q.label}`);
+    this.toastService.show(`Question [${q.key}]: ${q.label}`);
     this.stateService.addChatMessage('user', q.question);
     this.commandService.execute({ type: 'EXECUTE_AI_ACTION', payload: q.question });
   }
@@ -126,23 +126,5 @@ export class DemoModeService {
       event.preventDefault();
       this.askQuestion(question);
     }
-  }
-
-  private hasClientOverride(): boolean {
-    if (typeof window === 'undefined') return false;
-    const params = new URLSearchParams(window.location.search);
-    if (params.has('demo')) return true;
-    return localStorage.getItem('streetreader_demo_mode') !== null;
-  }
-
-  private readInitialFlag(): boolean {
-    if (typeof window === 'undefined') return false;
-    const params = new URLSearchParams(window.location.search);
-    if (params.has('demo')) {
-      const val = (params.get('demo') || 'true').toLowerCase();
-      return val !== 'false' && val !== '0';
-    }
-    const stored = localStorage.getItem('streetreader_demo_mode');
-    return stored === 'true';
   }
 }

@@ -92,7 +92,7 @@ export class SceneDescriptionComponent implements OnDestroy {
 
     // 1. Check cache first if not forced
     if (!force) {
-      const cachedDescription = this.cache.get(loc.lat, loc.lng, heading);
+      const cachedDescription = this.cache.get(loc.lat, loc.lng, heading, loc.imageId);
       if (cachedDescription) {
         this.processDescription(cachedDescription, true);
         return;
@@ -119,7 +119,7 @@ export class SceneDescriptionComponent implements OnDestroy {
       .subscribe({
         next: (response) => {
           if (response && response.description) {
-            this.cache.set(loc.lat, loc.lng, heading, response.description);
+            this.cache.set(loc.lat, loc.lng, heading, response.description, loc.imageId);
             this.processDescription(response.description, false);
           } else {
             this.processDescription('Could not generate a description for this view.', false);

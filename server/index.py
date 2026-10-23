@@ -201,16 +201,6 @@ def nearby_places():
         ))
     return jsonify(NearbyPlacesResponse(places=places[:10]).model_dump())
 
-def _get_gemini_key_override() -> str | None:
-    """Extracts an optional per-request Gemini API key from headers or URL query params."""
-    key = (
-        request.headers.get("X-Gemini-Api-Key")
-        or request.args.get("gemini_key")
-        or request.args.get("geminiKey")
-    )
-    return key.strip() if key and key.strip() else None
-
-
 @app.route('/v1/streetreader:describeImage', methods=['POST'])
 @log_call
 def describe_location():
@@ -226,11 +216,7 @@ def describe_location():
         return jsonify({"description": cached_desc})
 
     logger.info("[USER_EVENT] Generating image description")
-    gemini_key = _get_gemini_key_override()
-    if gemini_key:
-        description = ai_service.generate_description(image_base64, api_key=gemini_key)
-    else:
-        description = ai_service.generate_description(image_base64)
+    description = ai_service.generate_description(image_base64)
     logger.info(f"[USER_EVENT] AI Description: {description}")
     description_cache.put(image_hash, description)
 
@@ -248,20 +234,11 @@ def ask_question():
 
     logger.info(f"[USER_EVENT] AI Question: {question}")
 
-    gemini_key = _get_gemini_key_override()
-    if gemini_key:
-        answer = ai_service.ask_question(
-            image_base64,
-            question,
-            detect_actions=detect_actions,
-            api_key=gemini_key,
-        )
-    else:
-        answer = ai_service.ask_question(
-            image_base64,
-            question,
-            detect_actions=detect_actions
-        )
+    answer = ai_service.ask_question(
+        image_base64,
+        question,
+        detect_actions=detect_actions
+    )
 
     logger.info(f"[USER_EVENT] AI Response: {answer.answer}")
 

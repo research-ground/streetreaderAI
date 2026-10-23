@@ -34,7 +34,7 @@ export class UiService {
   private componentsState = signal<Record<UiComponentId, UiComponentState>>({
     navigation: { id: 'navigation', visible: true, side: 'left', order: 0 },
     'scene_description': { id: 'scene_description', visible: true, side: 'left', order: 1 },
-    'poi_list': { id: 'poi_list', visible: false, side: 'right', order: 2 },
+    'poi_list': { id: 'poi_list', visible: true, side: 'right', order: 2 },
     'adjacent_links': { id: 'adjacent_links', visible: false, side: 'right', order: 3 },
     chat: { id: 'chat', visible: true, side: 'right', order: 4 }
   });

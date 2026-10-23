@@ -98,7 +98,6 @@ class RouteParams:
     max_sinuosity: float = 1.35
     max_frame_step_m: float = 30.0
     panos_only: bool = True
-    locate_max_perp_m: float = field(default_factory=lambda: getattr(config, "ROUTE_LOCATE_MAX_PERP_M", 60.0))
     snapshot_radius_m: float = field(default_factory=lambda: getattr(config, "ROUTE_SNAPSHOT_RADIUS_M", 350.0))
     overpass_timeout_s: float = field(default_factory=lambda: getattr(config, "OVERPASS_TIMEOUT_S", 30.0))
 
@@ -855,7 +854,7 @@ def pick_seed(snap: AreaSnapshot, lat: float, lng: float, street_hint: Optional[
         named = [
             n for n in candidates
             if any(_norm_street(s) == hint_norm for s in n.street_names)
-            and calculate_distance(lat, lng, n.lat, n.lng) <= max(snap.p.locate_max_perp_m, 100.0)
+            and calculate_distance(lat, lng, n.lat, n.lng) <= 100.0
         ]
         if named:
             candidates = named

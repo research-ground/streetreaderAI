@@ -17,8 +17,8 @@
 import { TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { DemoModeService } from './demo_mode_service';
-import { DemoNavigationComponent } from './demo_navigation';
-import { DemoChatComponent } from './demo_chat';
+import { NavigationComponent } from '../components/navigation/navigation';
+import { ChatComponent } from '../components/chat/chat';
 import { NavigationService } from '../services/navigation_service';
 import { CommandService } from '../services/command_service';
 import { StateService } from '../services/state_service';
@@ -31,9 +31,8 @@ describe('DemoModeModule', () => {
   let stateService: StateService;
 
   beforeEach(async () => {
-    localStorage.removeItem('streetreader_demo_mode');
     await TestBed.configureTestingModule({
-      imports: [DemoNavigationComponent, DemoChatComponent],
+      imports: [NavigationComponent, ChatComponent],
       providers: [provideHttpClient()],
     }).compileComponents();
 
@@ -43,34 +42,37 @@ describe('DemoModeModule', () => {
     stateService = TestBed.inject(StateService);
   });
 
-  it('activates demo mode from runtime config and maps number keys 1-4 and 5-8', () => {
+  it('maps number keys 1-4 and 5-8 and switches to generic questions on custom address search', () => {
     const loadCoordsSpy = vi.spyOn(navService, 'loadCoordinates').mockImplementation(() => {});
-    const cmdSpy = vi.spyOn(commandService, 'execute').mockImplementation(() => {});
+    const cmdSpy = vi.spyOn(commandService, 'execute');
 
-    demoService.applyRuntimeConfig(true);
     expect(demoService.enabled()).toBe(true);
 
-    // Press '3' to jump to 3rd demo location (University Way)
+    // Press '3' to jump to 3rd preset location (Amsterdam — Damrak)
     window.dispatchEvent(new KeyboardEvent('keydown', { key: '3' }));
-    expect(demoService.activeLocation().id).toBe('seattle-university-way');
-    expect(loadCoordsSpy).toHaveBeenCalledWith(47.65985, -122.31312, 1);
+    expect(demoService.activeLocation()?.id).toBe('amsterdam-damrak');
+    expect(loadCoordsSpy).toHaveBeenCalledWith(52.3740, 4.8925, 205);
 
-    // Press '5' to ask first question for University Way
+    // Press '5' to ask first question for Amsterdam
     window.dispatchEvent(new KeyboardEvent('keydown', { key: '5' }));
     expect(cmdSpy).toHaveBeenCalledWith({
       type: 'EXECUTE_AI_ACTION',
       payload: demoService.activeQuestions()[0].question,
     });
     expect(stateService.state().chatHistory.length).toBeGreaterThan(0);
+
+    // Searching a custom address switches to generic questions
+    commandService.execute({ type: 'SEARCH_ADDRESS', payload: '123 Custom St, Chicago, IL' });
+    expect(demoService.activeLocation()).toBeNull();
+    expect(demoService.activeQuestions()[0].label).toBe('Storefronts & signs');
   });
 
-  it('renders DemoNavigationComponent and DemoChatComponent', () => {
-    demoService.setEnabled(true);
-    const navFixture = TestBed.createComponent(DemoNavigationComponent);
+  it('renders unified NavigationComponent and ChatComponent with preset buttons', () => {
+    const navFixture = TestBed.createComponent(NavigationComponent);
     navFixture.detectChanges();
     expect(navFixture.nativeElement.querySelectorAll('.demo-loc-btn').length).toBe(4);
 
-    const chatFixture = TestBed.createComponent(DemoChatComponent);
+    const chatFixture = TestBed.createComponent(ChatComponent);
     chatFixture.detectChanges();
     expect(chatFixture.nativeElement.querySelectorAll('.demo-q-btn').length).toBe(4);
   });

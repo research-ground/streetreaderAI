@@ -14,26 +14,50 @@
  limitations under the License.
  -->
 
-<div class="navigation-container">
-  <mat-form-field class="address-input" appearance="outline">
-    <mat-label>Address Search</mat-label>
-    <input type="text" placeholder="Enter an address" matInput [formControl]="searchControl" 
-           [matAutocomplete]="auto" aria-label="Enter an address to navigate to"
-           (keydown.enter)="loadAddress()">
-    <mat-autocomplete #auto="matAutocomplete" (optionSelected)="loadAddress($event.option.value)">
-      @if (autocompleteState$ | async; as state) {
-        @if (state.status === 'loading') {
-          <mat-option disabled aria-live="polite">Loading suggestions&hellip;</mat-option>
-        } @else if (state.status === 'empty') {
-          <mat-option disabled aria-live="polite">No matching locations found</mat-option>
-        } @else {
-          @for (option of state.items; track option.placeId) {
-            <mat-option [value]="option.description">{{ option.description }}</mat-option>
+<div class="navigation-wrapper">
+  <div class="navigation-container">
+    <mat-form-field class="address-input" appearance="outline">
+      <mat-label>Address Search</mat-label>
+      <input type="text" placeholder="Enter an address" matInput [formControl]="searchControl" 
+             [matAutocomplete]="auto" aria-label="Enter an address to navigate to"
+             (keydown.enter)="loadAddress()">
+      <mat-autocomplete #auto="matAutocomplete" (optionSelected)="loadAddress($event.option.value)">
+        @if (autocompleteState$ | async; as state) {
+          @if (state.status === 'loading') {
+            <mat-option disabled aria-live="polite">Loading suggestions&hellip;</mat-option>
+          } @else if (state.status === 'empty') {
+            <mat-option disabled aria-live="polite">No matching locations found</mat-option>
+          } @else {
+            @for (option of state.items; track option.placeId) {
+              <mat-option [value]="option.description">{{ option.description }}</mat-option>
+            }
           }
         }
-      }
-    </mat-autocomplete>
-  </mat-form-field>
+      </mat-autocomplete>
+    </mat-form-field>
 
-  <button mat-raised-button color="primary" (click)="loadAddress()" aria-label="Navigate to address">Go</button>
+    <button mat-raised-button color="primary" class="go-btn" (click)="loadAddress()" aria-label="Navigate to address">Go</button>
+  </div>
+
+  <div class="demo-nav-container" role="region" aria-label="Preset locations">
+    <div class="demo-hint">
+      Suggested locations (press keys <strong>1&ndash;4</strong> or click):
+    </div>
+    <div class="demo-location-list">
+      @for (loc of demoService.locations; track loc.id) {
+        <button
+          type="button"
+          class="demo-loc-btn"
+          [class.active]="demoService.activeLocation()?.id === loc.id"
+          (click)="selectPreset(loc)"
+          [attr.aria-label]="'Key ' + loc.key + ': ' + loc.title + ', ' + loc.subtitle">
+          <span class="key-badge" aria-hidden="true">{{ loc.key }}</span>
+          <span class="loc-text">
+            <span class="loc-title">{{ loc.title }}</span>
+            <span class="loc-sub">{{ loc.subtitle }}</span>
+          </span>
+        </button>
+      }
+    </div>
+  </div>
 </div>

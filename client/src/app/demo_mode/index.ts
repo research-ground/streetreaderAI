@@ -16,5 +16,3 @@
 
 export * from './demo_config';
 export * from './demo_mode_service';
-export * from './demo_navigation';
-export * from './demo_chat';

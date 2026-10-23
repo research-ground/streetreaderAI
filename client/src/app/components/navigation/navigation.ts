@@ -23,13 +23,13 @@ import { MatAutocompleteModule } from '@angular/material/autocomplete';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { Observable, of, concat } from 'rxjs';
-import { startWith, switchMap, distinctUntilChanged, debounceTime } from 'rxjs/operators';
+import { startWith, switchMap, distinctUntilChanged, debounceTime, map, catchError } from 'rxjs/operators';
 import { ApiService, AutocompleteItem } from '../../services/api_service';
 import { CommandService } from '../../services/command_service';
-import { map, catchError } from 'rxjs/operators';
 import { MatChipsModule } from '@angular/material/chips';
 import { MatDialog } from '@angular/material/dialog';
 import { ErrorDialogComponent } from '../error_dialog/error_dialog';
+import { DemoLocation, DemoModeService } from '../../demo_mode';
 
 interface AutocompleteState {
   status: 'idle' | 'loading' | 'empty' | 'results';
@@ -47,7 +47,7 @@ interface AutocompleteState {
     MatAutocompleteModule,
     MatButtonModule,
     MatIconModule,
-    MatChipsModule
+    MatChipsModule,
   ],
   templateUrl: './navigation.html',
   styleUrl: './navigation.css',
@@ -56,6 +56,7 @@ export class NavigationComponent {
   private apiService = inject(ApiService);
   private commandService = inject(CommandService);
   private dialog = inject(MatDialog);
+  protected demoService = inject(DemoModeService);
 
   protected readonly searchControl = new FormControl('', { nonNullable: true });
   protected readonly autocompleteState$: Observable<AutocompleteState>;
@@ -65,35 +66,31 @@ export class NavigationComponent {
   constructor() {
     const idle: AutocompleteState = { status: 'idle', items: [] };
 
-    // debounceTime waits for the user to pause before firing anything, so
-    // "loading" only appears once we've actually kicked off the API call.
-    // switchMap cancels in-flight requests if the user keeps typing, so
-    // Nominatim only sees one request per typing pause.
     this.autocompleteState$ = this.searchControl.valueChanges.pipe(
       startWith(''),
       debounceTime(300),
       distinctUntilChanged(),
-      switchMap(value => {
+      switchMap((value) => {
         if (!value) return of(idle);
         return concat(
           of<AutocompleteState>({ status: 'loading', items: [] }),
           this.apiService.autocompleteAddress(value).pipe(
-            map(res => {
+            map((res) => {
               const items = res.suggestions || [];
               const status: AutocompleteState['status'] = items.length === 0 ? 'empty' : 'results';
               return { status, items };
             }),
-            catchError(err => {
+            catchError((err) => {
               const errMsg = err?.error?.message || err?.message || 'Unknown error occurred.';
               this.dialog.open(ErrorDialogComponent, {
                 data: { title: 'Autocomplete Error', message: errMsg },
-                width: '400px'
+                width: '400px',
               });
               return of<AutocompleteState>({ status: 'empty', items: [] });
-            })
-          )
+            }),
+          ),
         );
-      })
+      }),
     );
   }
 
@@ -106,5 +103,9 @@ export class NavigationComponent {
       this.lastSearchTime = now;
       this.commandService.execute({ type: 'SEARCH_ADDRESS', payload: address });
     }
+  }
+
+  protected selectPreset(loc: DemoLocation): void {
+    this.demoService.selectLocation(loc);
   }
 }

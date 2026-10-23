@@ -76,6 +76,7 @@ export class App implements OnInit, OnDestroy {
   private dialog = inject(MatDialog);
 
   private commandSubscription?: Subscription;
+  private startingAddress = '601 N 34th St, Seattle, WA';
 
   protected leftComponents = computed(() => this.uiService.getComponentsBySide('left'));
   protected rightComponents = computed(() => this.uiService.getComponentsBySide('right'));
@@ -115,12 +116,11 @@ export class App implements OnInit, OnDestroy {
     this.appController.setTraveling();
     this.apiService.getConfig().subscribe({
       next: (cfg) => {
-        this.demoModeService.applyRuntimeConfig(cfg.demoMode);
-        const address = cfg.startingAddress || '601 N 34th St, Seattle, WA';
-        this.navigationService.loadLocationWithHeading(address, 0);
+        this.startingAddress = cfg.startingAddress || '601 N 34th St, Seattle, WA';
+        this.navigationService.loadLocationWithHeading(this.startingAddress, 0);
       },
       error: () => {
-        this.navigationService.loadLocationWithHeading('601 N 34th St, Seattle, WA', 0);
+        this.navigationService.loadLocationWithHeading(this.startingAddress, 0);
       }
     });
 
@@ -147,11 +147,9 @@ export class App implements OnInit, OnDestroy {
 
     dialogRef.afterClosed().subscribe(() => {
       // First interaction happened, speak initial greeting
-      const addr = this.stateService.state().address;
+      const addr = this.stateService.state().address || this.startingAddress;
       this.speechOutputService.speak(
-        addr
-          ? `Street Reader A I initialized. You are at ${addr}.`
-          : 'Street Reader A I initialized. You are at 411 15th Avenue East, Seattle.'
+        `Street Reader A I initialized. You are at ${addr}.`
       );
       if (this.stateService.autoDescribe()) {
         this.descriptionService.needsRefresh(false);
@@ -169,11 +167,9 @@ export class App implements OnInit, OnDestroy {
 
     dialogRef.afterClosed().subscribe(() => {
       this.stateService.setActivationDialog(false);
-      const addr = this.stateService.state().address;
+      const addr = this.stateService.state().address || this.startingAddress;
       this.speechOutputService.speak(
-        addr
-          ? `Speech activated. You are at ${addr}.`
-          : 'Speech activated. You are at 411 15th Avenue East, Seattle.'
+        `Speech activated. You are at ${addr}.`
       );
       if (this.stateService.autoDescribe()) {
         this.descriptionService.needsRefresh(false);
@@ -228,13 +224,6 @@ export class App implements OnInit, OnDestroy {
         this.speechOutputService.stop();
         if (document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement) {
           document.activeElement.blur();
-        }
-        break;
-      case 'TOGGLE_VOICE':
-        if (this.speechInputService.listening()) {
-          this.speechInputService.stopListening();
-        } else {
-          this.speechInputService.startListening();
         }
         break;
       case 'FOCUS_SEARCH':

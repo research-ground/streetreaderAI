@@ -15,7 +15,7 @@
  */
 
 import { Injectable, inject } from '@angular/core';
-import { ApiService, GetViewResponse, Link, RenderViewResponse } from './api_service';
+import { ApiService, GetViewResponse, Link, NearbyPlace, RenderViewResponse } from './api_service';
 import { StateService } from './state_service';
 import { DescriptionService } from './description_service';
 import { ToastService } from './toast_service';
@@ -32,6 +32,7 @@ interface CachedNode {
   lat: number;
   lng: number;
   address?: string;
+  pois?: NearbyPlace[];
 }
 
 @Injectable({ providedIn: 'root' })
@@ -44,6 +45,7 @@ export class NavigationService {
 
   private nodeCache = new Map<string, CachedNode>();
   private viewSub?: Subscription;
+  private poiSub?: Subscription;
 
   /** Address entered manually. One request: the view endpoint geocodes,
    * anchors, and returns image + links + address together. */
@@ -121,9 +123,16 @@ export class NavigationService {
     }).subscribe({
       next: (rendered: RenderViewResponse) => {
         this.stateService.setImage(rendered.image ?? null);
+        const effectiveHeading =
+          rendered.actualHeading !== undefined && rendered.actualHeading !== null
+            ? rendered.actualHeading
+            : heading;
         if (rendered.actualHeading !== undefined && rendered.actualHeading !== null) {
           this.stateService.setHeading(rendered.actualHeading);
         }
+        const pois = cached.pois
+          ? this.reorientPois(cached.pois, cached.lat, cached.lng, effectiveHeading)
+          : this.reorientPois(this.stateService.state().nearbyPOIs, cached.lat, cached.lng, effectiveHeading);
         if (isStepChange) {
           this.stateService.updateLocation(
             cached.lat,
@@ -134,8 +143,11 @@ export class NavigationService {
           );
           this.stateService.setMetadata({
             adjacentNodes: cached.links,
+            nearbyPOIs: pois,
             ...(cached.address ? { address: cached.address } : {}),
           });
+        } else {
+          this.stateService.setMetadata({ nearbyPOIs: pois });
         }
         this.stateService.setLoading(false);
         if (!this.stateService.showWelcome() && !this.stateService.showActivationDialog()) {
@@ -196,12 +208,66 @@ export class NavigationService {
     this.stateService.setMetadata({ adjacentNodes: links, address });
     this.stateService.setLoading(false);
 
+    if (coords) {
+      const effectiveHeading =
+        view.actualHeading !== undefined && view.actualHeading !== null
+          ? view.actualHeading
+          : params.heading;
+      this.fetchNearbyPois(nodeId, coords.latitude, coords.longitude, effectiveHeading);
+    }
+
     if (view.status === 'path_only' && view.message) {
       this.toastService.show(view.message);
     }
     if (!this.stateService.showWelcome() && !this.stateService.showActivationDialog()) {
       this.descriptionService.needsRefresh(false);
     }
+  }
+
+  private fetchNearbyPois(nodeId: string | null, lat: number, lng: number, heading: number) {
+    this.poiSub?.unsubscribe();
+    this.poiSub = this.apiService.getNearbyPlaces({ lat, lng, heading }).subscribe({
+      next: (res) => {
+        const places = res?.places ?? [];
+        this.stateService.setMetadata({ nearbyPOIs: places });
+        if (nodeId) {
+          const cached = this.nodeCache.get(nodeId);
+          if (cached) {
+            cached.pois = places;
+          }
+        }
+      },
+      error: () => {
+        this.stateService.setMetadata({ nearbyPOIs: [] });
+      },
+    });
+  }
+
+  private reorientPois(
+    pois: NearbyPlace[],
+    camLat: number,
+    camLng: number,
+    camHeading: number,
+  ): NearbyPlace[] {
+    return pois.map((poi) => {
+      if (!poi.location) return poi;
+      const dLon = ((poi.location.longitude - camLng) * Math.PI) / 180;
+      const lat1 = (camLat * Math.PI) / 180;
+      const lat2 = (poi.location.latitude * Math.PI) / 180;
+      const y = Math.sin(dLon) * Math.cos(lat2);
+      const x =
+        Math.cos(lat1) * Math.sin(lat2) -
+        Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+      const bearing = ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+      const diff = ((bearing - camHeading + 180) % 360) - 180;
+      return {
+        ...poi,
+        relativePosition: {
+          side: diff > 0 ? 'RIGHT' : 'LEFT',
+          depth: Math.abs(diff) < 90 ? 'FRONT' : 'BEHIND',
+        },
+      };
+    });
   }
 
   private streetLabelFromLinks(nodeId: string | null, links: Link[]): string | null {

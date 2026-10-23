@@ -46,7 +46,6 @@ export interface AppState {
   
   // App Session State
   chatHistory: ChatMessage[];
-  authToken: string | null;
   isLoading: boolean;
   modifierKey: ModifierKey;
   orientationDisplayMode: OrientationDisplayMode;
@@ -77,7 +76,6 @@ export class StateService {
     adjacentNodes: [],
     nearbyPOIs: [],
     chatHistory: [],
-    authToken: null,
     isLoading: false,
     modifierKey: (localStorage.getItem(this.MODIFIER_KEY) as ModifierKey) || 'alt',
     orientationDisplayMode: (localStorage.getItem(this.ORIENTATION_MODE_KEY) as OrientationDisplayMode) || 'both',
@@ -95,7 +93,6 @@ export class StateService {
   readonly currentLocation = computed(() => this.appState().location);
   readonly currentHeading = computed(() => this.appState().heading);
   readonly currentImage = computed(() => this.appState().currentImage);
-  readonly isAuthenticated = computed(() => !!this.appState().authToken);
   readonly modifierKey = computed(() => this.appState().modifierKey);
   readonly orientationDisplayMode = computed(() => this.appState().orientationDisplayMode);
   readonly chatControlsApp = computed(() => this.appState().chatControlsApp);
@@ -108,14 +105,6 @@ export class StateService {
     const heading = this.appState().heading;
     return this.formatHeadingValue(heading);
   });
-
-  init(startLat: number, startLng: number, token?: string) {
-    this.appState.update(s => ({
-      ...s,
-      location: { lat: startLat, lng: startLng },
-      authToken: token || null
-    }));
-  }
 
   setModifierKey(key: ModifierKey) {
     localStorage.setItem(this.MODIFIER_KEY, key);
@@ -168,25 +157,16 @@ export class StateService {
     }));
   }
 
-  updateImageId(imageId: string) {
-    this.appState.update(s => ({
-      ...s,
-      location: { ...s.location, imageId }
-    }));
-  }
-
   updateHeading(delta: number) {
     this.appState.update(s => {
       let newHeading = (s.heading + delta) % 360;
       if (newHeading < 0) newHeading += 360;
-      console.error('HEADING_CHANGED_TO:', newHeading, new Error().stack);
       return { ...s, heading: newHeading };
     });
   }
 
   setHeading(heading: number) {
     const newHeading = (heading + 360) % 360;
-    console.error('HEADING_CHANGED_TO:', newHeading, new Error().stack);
     this.appState.update(s => ({ ...s, heading: newHeading }));
   }
 
@@ -208,10 +188,6 @@ export class StateService {
 
   setLoading(isLoading: boolean) {
     this.appState.update(s => ({ ...s, isLoading }));
-  }
-
-  setAuthToken(token: string | null) {
-    this.appState.update(s => ({ ...s, authToken: token }));
   }
 
   getHotkeyString(key: string): string {

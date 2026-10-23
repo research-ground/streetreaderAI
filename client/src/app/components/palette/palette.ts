@@ -25,12 +25,11 @@ import { SceneDescriptionComponent } from '../scene_description/scene_descriptio
 import { NavigationComponent } from '../navigation/navigation';
 import { PoiListComponent } from '../poi_list/poi_list';
 import { ChatComponent } from '../chat/chat';
-import { DemoChatComponent, DemoModeService, DemoNavigationComponent } from '../../demo_mode';
 
 @Component({
   selector: 'app-palette',
   standalone: true,
-  imports: [CommonModule, MatExpansionModule, MatButtonModule, MatIconModule, AdjacentLinksComponent, SceneDescriptionComponent, NavigationComponent, PoiListComponent, ChatComponent, DemoNavigationComponent, DemoChatComponent],
+  imports: [CommonModule, MatExpansionModule, MatButtonModule, MatIconModule, AdjacentLinksComponent, SceneDescriptionComponent, NavigationComponent, PoiListComponent, ChatComponent],
   template: `
     <div class="floating-palette" [ngClass]="side + '-palette'">
       <mat-accordion multi>
@@ -42,11 +41,7 @@ import { DemoChatComponent, DemoModeService, DemoNavigationComponent } from '../
             
             <div class="palette-content">
               @if (comp.id === 'navigation') {
-                @if (demoService.enabled()) {
-                  <app-demo-navigation></app-demo-navigation>
-                } @else {
-                  <app-navigation></app-navigation>
-                }
+                <app-navigation></app-navigation>
               } @else if (comp.id === 'scene_description') {
                 <app-scene-description></app-scene-description>
               } @else if (comp.id === 'adjacent_links') {
@@ -54,11 +49,7 @@ import { DemoChatComponent, DemoModeService, DemoNavigationComponent } from '../
               } @else if (comp.id === 'poi_list') {
                 <app-poi-list></app-poi-list>
               } @else if (comp.id === 'chat') {
-                @if (demoService.enabled()) {
-                  <app-demo-chat></app-demo-chat>
-                } @else {
-                  <app-chat></app-chat>
-                }
+                <app-chat></app-chat>
               } @else {
                 <p>Content for {{ comp.id }}</p>
               }
@@ -97,7 +88,6 @@ import { DemoChatComponent, DemoModeService, DemoNavigationComponent } from '../
   `]
 })
 export class PaletteComponent {
-  protected demoService = inject(DemoModeService);
   @Input() components: UiComponentState[] = [];
   @Input() side: 'left' | 'right' = 'left';
 

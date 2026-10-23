@@ -22,22 +22,24 @@ import { Injectable } from '@angular/core';
 export class DescriptionCacheService {
   private readonly PREFIX = 'streetreader_desc_';
 
-  private getKey(lat: number, lng: number, heading: number): string {
+  private getKey(lat: number, lng: number, heading: number, imageId?: string | null): string {
     // Round heading to nearest 45 degrees to handle minor variations
-    const snappedHeading = Math.round(heading / 45) * 45;
+    const snappedHeading = ((Math.round(heading / 45) * 45) % 360 + 360) % 360;
+    if (imageId) {
+      return `${this.PREFIX}img:${imageId}:${snappedHeading}`;
+    }
     return `${this.PREFIX}${lat.toFixed(4)}:${lng.toFixed(4)}:${snappedHeading}`;
   }
 
-  get(lat: number, lng: number, heading: number): string | null {
-    return localStorage.getItem(this.getKey(lat, lng, heading));
+  get(lat: number, lng: number, heading: number, imageId?: string | null): string | null {
+    return localStorage.getItem(this.getKey(lat, lng, heading, imageId));
   }
 
-  set(lat: number, lng: number, heading: number, description: string): void {
+  set(lat: number, lng: number, heading: number, description: string, imageId?: string | null): void {
     try {
-      localStorage.setItem(this.getKey(lat, lng, heading), description);
+      localStorage.setItem(this.getKey(lat, lng, heading, imageId), description);
     } catch (e) {
       console.error("Failed to write to localStorage. Cache might be full.", e);
-      // Implement a cache eviction strategy if necessary
     }
   }
 
