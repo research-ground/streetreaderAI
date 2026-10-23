@@ -215,17 +215,3 @@ Returns the solved local navigation graph (unified `osm_<id>` intersections and 
   }
 }
 ```
-
----
-
-## 5. Optional Key-Sharing Proxy Endpoints (`proxy/`)
-
-When StreetReaderAI is served behind the optional key-sharing proxy (`proxy/server.mjs`), the following endpoints allow sharing **Gemini** (`gemini-3.8-flash`) and **Google Maps** API keys without exposing them to the browser. When a key is provided by the proxy, the corresponding provider selector and key field are **locked** in the UI.
-
-| Method & Path | Description |
-| :--- | :--- |
-| `GET /api/proxy/status` | Returns `{ "gemini": boolean, "googleMaps": boolean }` indicating which keys are shared by the proxy. |
-| `POST /api/proxy/gemini` | Forwards a Gemini `generateContent` request body to `models/gemini-3.8-flash:generateContent` using the server's `GEMINI_API_KEY`. |
-| `GET /api/proxy/google/geocode` | Forwards `address` or `latlng` query parameters to the Google Geocoding API using the server's `GOOGLE_MAPS_API_KEY`. |
-| `POST /api/proxy/google/autocomplete` | Forwards a Places Autocomplete request body to `places.googleapis.com/v1/places:autocomplete`. |
-| `POST /api/proxy/google/nearby` | Forwards a Places Nearby Search request body to `places.googleapis.com/v1/places:searchNearby`. |

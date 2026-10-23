@@ -51,16 +51,16 @@ While the original research prototype in the paper was built on Google Street Vi
 | - OpenStreetMap v0.6 map.json    |---->|    StreetReaderAI      |<--->| - Google Gemini (gemini-3.8-flash) |
 | - Overpass API Mirrors (Fallback)|     |  (Browser Angular SPA) |     | - OpenAI (gpt-5.6-terra)           |
 |   (Intersections & Street Blocks)|     |                        |     |   (Scene Descriptions & Q&A)       |
-+----------------------------------+     +-----------+------------+     +-----------------+------------------+
-                                                     ^                                    ^
-                                                     | Address Lookup,                    |
-                                                     | Autocomplete & POIs                | (Optional Key-Sharing
-                                                     v                                    |  for Gemini & Maps)
-                                 +-------------------+--------------------+               |
-                                 |   3. Geocoding & Nearby POIs           |     +---------+----------+
-                                 |   - OpenStreetMap Nominatim &          |<--->|   Optional Proxy   |
-                                 |     Cached OSM Tile POIs (Default)     |     | (proxy/server.mjs) |
-                                 |   - Google Geocoding & Places API v1   |     +--------------------+
++----------------------------------+     +-----------+------------+     +------------------------------------+
+                                                     ^
+                                                     | Address Lookup,
+                                                     | Autocomplete & POIs
+                                                     v
+                                 +-------------------+--------------------+
+                                 |   3. Geocoding & Nearby POIs           |
+                                 |   - OpenStreetMap Nominatim &          |
+                                 |     Cached OSM Tile POIs (Default)     |
+                                 |   - Google Geocoding & Places API v1   |
                                  +----------------------------------------+
 ```
 
@@ -107,12 +107,7 @@ On first launch (or whenever no active AI API key is configured), StreetReaderAI
 
 You can update any of these options later via the **Settings** button or by pressing `Shift + /` (`?` for hotkeys).
 
-### 4. Optional Key-Sharing Proxy & AI Studio Compatibility
-
-* **Google AI Studio**: StreetReaderAI includes `client/metadata.json` and safe storage/environment detection (`safe_storage.ts` and `process.env.API_KEY` / `GEMINI_API_KEY` detection in `ConfigService`). When hosted in an environment that injects a Gemini or Google Maps API key, that provider is automatically enabled and locked in the UI.
-* **Key-Sharing Proxy**: When deployed behind the optional lightweight proxy (`/api/proxy/status`, `/api/proxy/gemini`, `/api/proxy/google/*`), the server can share `GEMINI_API_KEY` and/or `GOOGLE_MAPS_API_KEY` without exposing raw keys to the browser. Any provider supplied by the proxy is locked in the First-Run and Settings dialogs so users cannot override it.
-
-### 5. Building & Running Tests
+### 4. Building & Running Tests
 
 ```bash
 # Run unit tests (Vitest + Angular TestBed)
@@ -125,7 +120,7 @@ make build
 ---
 
 ## Documentation
-* **[Service & API Reference](docs/api_reference.md)**: Authoritative reference for `ApiService` data models, service interfaces, and optional proxy endpoints.
+* **[Service & API Reference](docs/api_reference.md)**: Authoritative reference for `ApiService` data models and service interfaces.
 * **[Routing & Imagery Architecture](docs/routing_architecture.md)**: Deep dive into the 5-step intersection + sequence-slice routing algorithm, HTML5 `<canvas>` equirectangular projection, and OSM rate-limit safeguards.
 
 ---
