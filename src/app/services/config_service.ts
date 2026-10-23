@@ -362,19 +362,21 @@ export class ConfigService {
   }
 
   /**
-   * Loads `/streetreaderai.conf` (falling back to `/streetreaderai.conf.example`).
+   * Loads `/streetreaderai.conf.example` as the default layer and merges
+   * `/streetreaderai.conf` on top if present.
    */
   async loadConfig(): Promise<void> {
-    const confText =
-      (await this.fetchConfFile('/streetreaderai.conf')) ??
-      (await this.fetchConfFile('/streetreaderai.conf.example'));
-    if (confText) {
-      this.sections = parseConfIni(
-        confText,
-        parseConfIni(DEFAULT_STREETREADER_CONF)
-      );
-      this.applyConfSections(this.sections);
+    let baseSections = parseConfIni(DEFAULT_STREETREADER_CONF);
+    const exampleText = await this.fetchConfFile('/streetreaderai.conf.example');
+    if (exampleText) {
+      baseSections = parseConfIni(exampleText, baseSections);
     }
+    const userText = await this.fetchConfFile('/streetreaderai.conf');
+    if (userText) {
+      baseSections = parseConfIni(userText, baseSections);
+    }
+    this.sections = baseSections;
+    this.applyConfSections(this.sections);
   }
 
   /**

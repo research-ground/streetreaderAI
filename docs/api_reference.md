@@ -14,7 +14,7 @@ StreetReaderAI executes as a **100% client-side Angular SPA**. All navigation, r
 * [`PanoramaCropService`](../src/app/services/panorama_crop_service.ts) — HTML5 `<canvas>` 360° equirectangular-to-rectilinear projection (`960×720`, `120°` FOV, with decoded `Uint8ClampedArray` pixel buffer caching).
 * [`LocationProviderService`](../src/app/services/location_provider_service.ts) — Declarative geocoding, reverse geocoding, autocomplete, and nearby POI client configured by `[location.<name>]` in `streetreaderai.conf`.
 * [`AiProviderService`](../src/app/services/ai_provider_service.ts) — Declarative multimodal scene description and visual Q&A client configured by `[ai.<name>]` in `streetreaderai.conf` (Google Gemini `gemini-3.8-flash` or OpenAI-compatible `gpt-5.6-terra`).
-* [`ConfigService`](../src/app/services/config_service.ts) — Loads `streetreaderai.conf` (falling back to `streetreaderai.conf.example`), parses `[system]`, `[keys]`, and declarative provider sections (`[imagery.*]`, `[location.*]`, `[ai.*]`), detects host environment keys (`process.env.GEMINI_API_KEY`), and validates required keys on launch (`validateRequiredKeys()`).
+* [`ConfigService`](../src/app/services/config_service.ts) — Loads `streetreaderai.conf.example` as the default layer and merges `streetreaderai.conf` on top if present, parses `[system]`, `[keys]`, and declarative provider sections (`[imagery.*]`, `[location.*]`, `[ai.*]`), detects host environment keys (`process.env.GEMINI_API_KEY`), and validates required keys on launch (`validateRequiredKeys()`).
 
 ---
 

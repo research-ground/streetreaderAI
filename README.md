@@ -20,11 +20,8 @@
 Because the repository is public and uses open defaults (**Panoramax** for 360° street imagery and **OpenStreetMap** for road routing, geocoding, and POIs), you can run StreetReaderAI directly in **Google AI Studio** with zero paid APIs or credit card required:
 
 1. Open **[Google AI Studio](https://aistudio.google.com/)** (**Build**) and import this public GitHub repository (`https://github.com/research-ground/streetreaderAI`), or generate a clean archive locally with `make make-for-aistudio` and import `streetreaderai-aistudio.zip`.
-2. **Automatic Configuration & Key Injection**:
-   * StreetReaderAI automatically loads [`streetreaderai.conf.example`](streetreaderai.conf.example) and detects AI Studio's built-in `GEMINI_API_KEY` (`gemini-3.8-flash`).
-   * If you want to customize providers, URLs, or keys inside AI Studio, edit `streetreaderai.conf.example` directly in the AI Studio code editor.
-3. **Sharing or Deploying**:
-   * Click **Share** in AI Studio to share your applet link with others, or click **Deploy to Cloud Run** in the top-right corner of AI Studio for a standalone hosted URL.
+2. **Automatic Setup**: StreetReaderAI uses its built-in defaults (**Panoramax** + **OpenStreetMap**) and automatically detects AI Studio's injected `GEMINI_API_KEY` (`gemini-3.8-flash`)—no configuration file is required.
+3. **Sharing or Deploying**: Click **Share** in AI Studio to share your applet link with others, or click **Deploy to Cloud Run** in the top-right corner of AI Studio for a standalone hosted URL.
 
 ### Option 2: Run Locally
 
@@ -55,7 +52,7 @@ mapillary_token =
 google_maps_api_key =
 ```
 
-> **Note**: `streetreaderai.conf` is git-ignored so your personal API keys are never committed. If a required key for the active providers in `[system]` is missing on launch, StreetReaderAI displays a **Configuration Error** dialog identifying which key to add. See **[Configuring Data & AI Providers](docs/configuration.md)** for full details on switching or adding providers.
+> **Note**: StreetReaderAI loads its default configuration from [`streetreaderai.conf.example`](streetreaderai.conf.example) and overlays any settings or API keys you define in `streetreaderai.conf`. `streetreaderai.conf` is git-ignored so your personal API keys are never committed (always edit `streetreaderai.conf` rather than `streetreaderai.conf.example`). If a required key for the active providers in `[system]` is missing on launch, StreetReaderAI displays a **Configuration Error** dialog identifying which key to add. See **[Configuring Data & AI Providers](docs/configuration.md)** for full details on switching or adding providers.
 
 Start the development server:
 

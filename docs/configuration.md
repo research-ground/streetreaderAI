@@ -2,9 +2,8 @@
 
 StreetReaderAI uses a single human-readable INI configuration file—`streetreaderai.conf`—to select active backend services, supply API keys, and define provider plugins declaratively using URL templates and JSON dot-path field mappings.
 
-* **`streetreaderai.conf.example`** (tracked in git): Default configuration template pre-configured for **Panoramax** (imagery), **OpenStreetMap** (geocoding & POIs), and **Google Gemini** (`gemini-3.8-flash`).
-* **`streetreaderai.conf`** (git-ignored): Your local configuration file containing your personal API keys. Running `make setup` automatically copies `streetreaderai.conf.example` to `streetreaderai.conf` if it does not already exist.
-* **Fallback in Google AI Studio**: When `streetreaderai.conf` is not present (such as when importing the public GitHub repository into Google AI Studio), StreetReaderAI automatically loads `streetreaderai.conf.example` and reads the host-injected `GEMINI_API_KEY`.
+* **Default Layer ([`streetreaderai.conf.example`](../streetreaderai.conf.example))**: Tracked in git and loaded first as the base default configuration (**Panoramax** for imagery, **OpenStreetMap** for geocoding & POIs, and **Google Gemini** `gemini-3.8-flash`). In environments that inject `GEMINI_API_KEY` automatically (such as Google AI Studio), no changes are needed unless you want to override these defaults.
+* **User Overrides (`streetreaderai.conf`)**: To customize settings or provide API keys, create or edit **`streetreaderai.conf`** in the repository root (git-ignored so your personal keys are never committed). Running `make setup` automatically copies `streetreaderai.conf.example` to `streetreaderai.conf` if it does not already exist, and at runtime StreetReaderAI merges `streetreaderai.conf` on top of `streetreaderai.conf.example`.
 
 ---
 
