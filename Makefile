@@ -1,14 +1,15 @@
 # StreetReaderAI Makefile
 # Orchestrates setup, building, serving, and testing the Angular SPA.
 
-.PHONY: setup build start test check help
+.PHONY: setup build start test check make-for-aistudio help
 
 help:
 	@echo "StreetReaderAI Management Commands:"
-	@echo "  make setup - Install npm dependencies"
-	@echo "  make start - Start the Angular development server on http://localhost:4200"
-	@echo "  make build - Build the static Angular SPA into dist/StreetReaderAI/browser"
-	@echo "  make test  - Run unit tests"
+	@echo "  make setup             - Install npm dependencies"
+	@echo "  make start             - Start the Angular development server on http://localhost:4200"
+	@echo "  make build             - Build the static Angular SPA into dist/StreetReaderAI/browser"
+	@echo "  make test              - Run unit tests"
+	@echo "  make make-for-aistudio - Create a clean zip of tracked files for Google AI Studio import"
 
 setup:
 	npm install
@@ -27,3 +28,8 @@ test:
 	npm test -- --watch=false
 
 check: test
+
+make-for-aistudio:
+	@echo "==> Creating clean archive streetreaderai-aistudio.zip for Google AI Studio..."
+	git archive --format=zip --output=streetreaderai-aistudio.zip HEAD
+	@ls -lh streetreaderai-aistudio.zip

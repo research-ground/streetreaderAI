@@ -120,14 +120,18 @@ StreetReaderAI is compatible with **Google AI Studio** and can run end-to-end on
 | **4. Vision-Language Model (VLM)** | **Google Gemini (`gemini-3.8-flash`)** (Default) | **Free Tier** — Provided automatically by AI Studio (`GEMINI_API_KEY` / `API_KEY`) or via a free key from [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
 
 #### How to Import / Deploy in Google AI Studio
-1. Open [Google AI Studio](https://aistudio.google.com/) and go to **Build** (or **Apps** $\rightarrow$ **Create new app**).
-2. Import this repository directly (since `package.json`, `angular.json`, `metadata.json`, and `src/` are at the repository root):
-   * **Option A (GitHub Import)**: Connect your GitHub repository directly in AI Studio.
-   * **Option B (Upload Folder / Zip)**: Upload the repository folder into a new AI Studio app.
-3. **Automatic Key Injection**:
+1. Generate a clean zip archive of the repository's tracked files (excluding `node_modules/` and `.git/`):
+   ```bash
+   make make-for-aistudio
+   ```
+   This produces `streetreaderai-aistudio.zip` in the repository root.
+2. Open [Google AI Studio](https://aistudio.google.com/) (**Build**) and start a blank project by typing `"blank project"` in the prompt.
+3. When the project opens, **stop the agent** immediately (it will begin generating template files even though you requested a blank project).
+4. Add/attach `streetreaderai-aistudio.zip` to the chat prompt and prompt the agent: `"import files"`.
+5. **Automatic Key Injection**:
    * When running inside the AI Studio preview environment, StreetReaderAI automatically detects the injected `process.env.GEMINI_API_KEY` (or `process.env.API_KEY`), pre-configures Google Gemini (`gemini-3.8-flash`), and uses an in-memory fallback (`safeStorage`) when running inside AI Studio's sandboxed iframe.
    * Keep **Street Imagery Provider** set to **Panoramax** and **Location & Geocoding Provider** set to **OpenStreetMap** in the First-Run dialog so that no Mapillary or Google Maps billing keys are needed.
-4. **Sharing / Deploying from AI Studio**:
+6. **Sharing / Deploying from AI Studio**:
    * Click **Share** in AI Studio to share the applet link with other users (each viewer uses their own free AI Studio Gemini quota), or click **Deploy to Cloud Run** in the top-right corner of AI Studio for a standalone hosted URL.
 
 ### 5. Building & Running Tests
