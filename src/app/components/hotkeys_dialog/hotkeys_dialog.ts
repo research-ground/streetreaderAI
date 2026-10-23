@@ -30,6 +30,16 @@ import { StateService } from '../../services/state_service';
   template: `
     <h2 mat-dialog-title>Help</h2>
     <mat-dialog-content class="help-content" #scrollTarget>
+      <section class="prototype-banner">
+        <p>
+          <strong>Research Prototype &amp; Feedback:</strong> StreetReaderAI is a research prototype
+          and will likely have bugs. Please
+          <a href="https://github.com/research-ground/streetreaderAI/issues" target="_blank" rel="noopener noreferrer">file bugs on GitHub</a>
+          or send feedback to
+          <a href="mailto:streetreaderai-team@google.com">streetreaderai-team&#64;google.com</a>.
+        </p>
+      </section>
+
       <section>
         <h3>How to use StreetReaderAI</h3>
         <ul>
@@ -124,6 +134,15 @@ import { StateService } from '../../services/state_service';
     .help-content {
       line-height: 1.4;
       font-size: 16px;
+    }
+    .prototype-banner {
+      padding: 10px 12px;
+      margin-bottom: 12px;
+      background: #f3f6fb;
+      border-left: 3px solid #1976d2;
+      border-radius: 4px;
+      font-size: 14px;
+      color: #333;
     }
     section { margin-bottom: 8px; }
     h3 { 

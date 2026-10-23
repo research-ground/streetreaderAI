@@ -68,6 +68,12 @@ import { RouteProviderService } from '../../services/route_provider_service';
           of these options later in Settings (<kbd>Shift</kbd>+<kbd>/</kbd>).
         </p>
 
+        <p class="prototype-note">
+          <strong>Note:</strong> StreetReaderAI is a research prototype and will likely have bugs.
+          You can <a href="https://github.com/research-ground/streetreaderAI/issues" target="_blank" rel="noopener noreferrer">file bugs on GitHub</a>
+          or send feedback to <a href="mailto:streetreaderai-team@google.com">streetreaderai-team&#64;google.com</a>.
+        </p>
+
         <!-- 1. AI Vision Provider & Key (Required) -->
         <section class="setup-section" aria-labelledby="setup-ai-heading">
           <h3 id="setup-ai-heading">1. AI Scene Description (Required)</h3>
@@ -298,7 +304,25 @@ import { RouteProviderService } from '../../services/route_provider_service';
   styles: [`
     .first-run-container { padding: 4px 8px; }
     h2 { margin-bottom: 4px; font-size: 22px; font-weight: 500; }
-    .intro-text { margin-bottom: 18px; font-size: 14px; color: #444; line-height: 1.45; }
+    .intro-text { margin-bottom: 10px; font-size: 14px; color: #444; line-height: 1.45; }
+    .prototype-note {
+      margin: 0 0 18px 0;
+      padding: 10px 12px;
+      background: #f3f6fb;
+      border-left: 3px solid #1976d2;
+      border-radius: 4px;
+      font-size: 13px;
+      color: #333;
+      line-height: 1.45;
+    }
+    .prototype-note a {
+      color: #1565c0;
+      text-decoration: none;
+      font-weight: 500;
+    }
+    .prototype-note a:hover {
+      text-decoration: underline;
+    }
     .setup-section { margin-bottom: 20px; }
     .setup-section h3 {
       margin: 0 0 8px 0;
