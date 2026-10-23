@@ -536,7 +536,7 @@ export class ImageryProviderService implements ImageryProviderClient {
 
       const intermediates: LocationMetadata[] = [];
       if (totalDist > 24.0) {
-        const nSteps = Math.max(2, Math.ceil(totalDist / 16.0));
+        const nSteps = Math.max(2, Math.round(totalDist / 18.0));
         const sampleCoords: Array<{ lat: number; lng: number }> = [];
         for (let k = 1; k < nSteps; k++) {
           const frac = k / nSteps;

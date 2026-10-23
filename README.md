@@ -4,7 +4,7 @@ StreetReaderAI is an AI-powered accessibility tool designed for blind and low-vi
 
 > **Research Prototype & Feedback**: StreetReaderAI is an experimental research prototype and will likely have bugs. Please [file bugs on GitHub](https://github.com/research-ground/streetreaderAI/issues) or send feedback and questions to [streetreaderai-team@google.com](mailto:streetreaderai-team@google.com).
 
-![StreetReaderAI Main Interface](docs/screenshot.png)
+![Screenshot of the StreetReaderAI main interface showing a street-level view of North 34th Street in Seattle flanked by brick and modern mixed-use buildings and street trees. Floating panels on the left display Navigation (with an Address Search input and numbered preset buttons 1 through 4 for Seattle, Paris, Amsterdam, and Brussels), Scene Description (reading "This is a straight urban street flanked by multi-story mixed-use buildings on both sides..."), and Movement Keys (arrow keys to move forward, turn around 180 degrees, or turn left and right 45 degrees). Floating panels on the right display Points of Interest (Parkside Dental behind left, ZoomCare behind right, and PCC Dog on Bike front right), Chat & AI Controls (with a question input, microphone button, and numbered preset questions 5 through 8), and a bottom-right radar mini-map showing the local street graph and current heading cone. A bottom status bar announces the current address, Ahead: North 34th Street, Speech Off, and Heading: West 283 degrees.](docs/screenshot.png)
 
 ## Research Paper & Citation
 
@@ -38,6 +38,14 @@ While the original research prototype in the paper was built on Google Street Vi
 
 ## System Architecture
 
+**Diagram Description**: The StreetReaderAI browser Angular Single-Page Application (SPA) sits at the center of four external data and AI services configured in `streetreaderai.conf`:
+1. **Street Imagery (top)** flows into StreetReaderAI: Panoramax STAC API (default, open) or Mapillary Graph API v4 (token) provide 360° equirectangular images and sequence metadata (or directional single-image views).
+2. **Route & Road Network (left)** flows into StreetReaderAI: OpenStreetMap v0.6 `map.json` (with Overpass API mirror fallback) provides intersections and street block geometry.
+3. **Geocoding & Nearby POIs (bottom)** exchanges address lookup, autocomplete, and POI queries with StreetReaderAI: OpenStreetMap Nominatim and cached OSM tile POIs (default) or Google Geocoding and Places API v1.
+4. **Vision-Language Model (right)** exchanges scene descriptions and visual Q&A with StreetReaderAI: Google Gemini (`gemini-3.8-flash`) or OpenAI (`gpt-5.6-terra`).
+
+<figure role="img" aria-label="System architecture diagram showing the StreetReaderAI Browser Angular SPA connected to four external services: 1. Street Imagery (Panoramax STAC API or Mapillary Graph API v4) sending 360-degree equirectangular images and sequence metadata; 2. Route and Road Network (OpenStreetMap v0.6 map.json and Overpass fallback) sending intersections and street blocks; 3. Geocoding and Nearby POIs (OpenStreetMap Nominatim and Cached OSM Tile POIs, or Google Geocoding and Places API v1) handling address lookup, autocomplete, and POIs; and 4. Vision-Language Model (Google Gemini gemini-3.8-flash or OpenAI gpt-5.6-terra) handling scene descriptions and Q&A.">
+
 ```text
                                  +----------------------------------------+
                                  |   1. Street Imagery (360° Panoramas)   |
@@ -65,6 +73,8 @@ While the original research prototype in the paper was built on Google Street Vi
                                  |   - Google Geocoding & Places API v1   |
                                  +----------------------------------------+
 ```
+
+</figure>
 
 ---
 

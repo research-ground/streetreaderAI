@@ -40,6 +40,9 @@ Welcome! As an AI development assistant (Gemini, Antigravity, Jetski, etc.) work
 ### ⚛️ Angular Frontend
 * **Image Identifiers**: Always use `imageId` instead of the legacy `pano_id`-based system.
 
+### ♿ Accessible Documentation
+* **Mandatory Alt Text & Accessible Descriptions**: All documentation (including `README.md` and files in `docs/`) must be accessible to screen reader users. Every image must have detailed, descriptive alt text (`![Detailed description...](path)`), and every block/ASCII/Mermaid diagram must include an accessible text description or `aria-label` summary explaining the components and data flow.
+
 ---
 
 ## 4. Workspace Hygiene
