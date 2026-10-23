@@ -188,6 +188,16 @@ make build
 
 ---
 
+## Data Sources & Attribution
+
+* **Road Network & Map Data**: © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright), licensed under the [Open Database License (ODbL)](https://opendatacommons.org/licenses/odbl/).
+* **Street-Level Imagery (Panoramax)**: © [Panoramax](https://panoramax.xyz/) contributors (IGN / OpenStreetMap France community instances), licensed under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) / [Etalab Open Licence 2.0](https://www.etalab.gouv.fr/licence-ouverte-open-licence/).
+* **Street-Level Imagery (Mapillary)**: © [Mapillary](https://www.mapillary.com/) contributors, licensed under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
+* **Geocoding & Places**: Powered by [OpenStreetMap Nominatim](https://nominatim.openstreetmap.org/) (© OpenStreetMap contributors) and [Google Maps Platform](https://developers.google.com/maps) (© Google).
+* **AI Scene Descriptions & Q&A**: Powered by [Google Gemini](https://ai.google.dev/) (© Google) and [OpenAI](https://openai.com/).
+
+---
+
 ## Credits
 
 The original research prototype was developed by:
