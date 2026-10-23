@@ -6,28 +6,22 @@ Welcome! As an AI development assistant (Gemini, Antigravity, Jetski, etc.) work
 
 ## 1. Git & Branching Rules
 
-### 🚫 Direct Pushes to `main` are Forbidden
-* **Rule**: Do not attempt to push directly to the `main` branch. The repository has branch protection rules enabled that will decline direct pushes (GH013).
-* **Action**: Always perform development on the `dev` branch or specific feature branches.
-
 ### 🌿 Branch Workflow
-1. **Base Branch**: All development should be based on the latest `main` or `dev` branch.
-2. **Work Branch**: Use the `dev` branch (or a feature branch like `feature/hygiene`) for staging, committing, and pushing your work.
-3. **Submitting Changes**: Once changes are pushed to `dev`, they must be merged into `main` via a Pull Request.
+1. **Primary Branch**: `main` is the primary development branch for the pure client-side Angular SPA.
+2. **Legacy Client-Server Branch**: The `client-server` branch preserves the earlier Python Flask backend + Angular client checkpoint.
 
 ---
 
 ## 2. Environment & Runtime Expectations
 
 ### 🖥️ Development Server
-* Before executing any automated tests (integration or browser tests) or browser tools, we must check if the dev server is active on ports 4200 (frontend) and 5001 (backend).
-* If the servers are not running, we must automatically spin them up in the background (e.g. via `make start` or individual targets) to support automated runs and interactive checks. Do not ask the developer to manually launch them.
+* StreetReaderAI runs as a 100% client-side Angular SPA on port 4200 (`make start` / `cd client && npm start`).
+* If the dev server is not running when executing browser tools or interactive checks, spin it up in the background (`make start`) rather than asking the developer to manually launch it.
 
 ### 🔑 API & Security Guidelines
-* **Backend Authorization**: The StreetReaderAI backend server does not require an authorization key (`x-streetreader-api-key`). Endpoints are directly accessible without auth headers.
-* **External Service Keys**: Real API keys for external services (Google Maps, Gemini, OpenAI, Mapillary) are configured on the backend via `server/streetreaderai.conf`.
+* **External Service Keys**: External service selections (Panoramax vs. Mapillary, OpenStreetMap vs. Google Maps, Gemini vs. OpenAI) and API keys are configured in the in-app **Settings** dialog (`ConfigService`, persisted in `localStorage`).
 * **Obtaining Keys**: The developer (user) can and will provide actual, functional API keys (e.g. Google Maps, Gemini, and Mapillary keys) when requested by the agent.
-* Avoid hardcoding any credentials or API keys. Use `server/streetreaderai.conf` and appropriate configuration models.
+* Avoid hardcoding any credentials or API keys in source files.
 
 ### 🤖 Gemini AI Model Selection
 * **Preferred Model**: The **sole preferred and authorized model** for all Gemini AI service features (e.g., scene description, interactive chat, and Q&A) is **`gemini-3.8-flash`**.
@@ -38,17 +32,14 @@ Welcome! As an AI development assistant (Gemini, Antigravity, Jetski, etc.) work
 ## 3. Code Style & Authority References
 
 ### 📘 Authoritative API Reference
-* **Reference**: [docs/api_reference.md](docs/api_reference.md) is the **sole authoritative reference** for the StreetReaderAI API documentation.
-* **Consistency**: Ensure any changes to API routes, payloads, query parameters, or responses strictly match this specification.
-* **PROHIBITED CHANGES**: The API request and response structures are fully verified, synchronized, and locked into a "known correct" state. **AI agents must never modify, adjust, adapt, or rename any API call structure, endpoint route, parameter casing, or payload nesting schema without explicit developer permission.**
+* **Reference**: [docs/api_reference.md](docs/api_reference.md) is the **sole authoritative reference** for the StreetReaderAI service interfaces and data models.
 
 ### 📐 TypeScript & JavaScript Style Guide
 * **Reference**: [Google TypeScript Style Guide](https://google.github.io/styleguide/tsguide.html) contains the coding standards.
 * **Action**: Follow all rules regarding naming, structure, and imports detailed in the styleguide.
 
 ### ⚛️ Angular Frontend
-* **Consolidated API**: The frontend has been updated to use the consolidated StreetReaderAI API.
-* **Image Identifiers**: Always use `image_id` instead of the legacy `pano_id`-based system.
+* **Image Identifiers**: Always use `imageId` instead of the legacy `pano_id`-based system.
 
 ---
 
@@ -62,13 +53,12 @@ Welcome! As an AI development assistant (Gemini, Antigravity, Jetski, etc.) work
 ## 5. Local Setup & Testing Guidelines
 
 ### 🛠️ Setting Up The Repository
-* **Automated Setup**: Run `make setup`. This copies `server/streetreaderai.conf.example` to `server/streetreaderai.conf` (if not already present), syncs Python dependencies via `uv sync`, and installs Node.js packages in `client/`.
-* **Configuration**: External service API keys (Google Maps, Gemini, etc.) and runtime flags are configured in `server/streetreaderai.conf`.
+* **Automated Setup**: Run `make setup` to install Node.js packages in `client/`.
+* **Configuration**: External service providers and API keys are configured via the in-app Settings dialog (`localStorage`).
 
 ### 🧪 Running Tests
-Always run the appropriate local test suites when making changes to verify correctness before pushing or submitting a pull request:
-* **Pre-commit gate**: Run `make test` (or `make check`) before every commit. It runs the offline server unit tests and client tests.
-* **Full Integration & Browser Suite**: Run `make test-all` to execute the master end-to-end test harness (requires the Flask server to be running on `localhost:5001` — start it with `make start`).
+Always run the local test suite when making changes to verify correctness before pushing:
+* **Pre-commit gate**: Run `make test` (or `make check`) before every commit.
 
 ---
 
