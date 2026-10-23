@@ -76,3 +76,20 @@ Always run the local test suite when making changes to verify correctness before
 * **Intersections + Direct Sequence Slices Only**:
   * OSM road geometry is used to identify **intersections** (merging multi-node junctions and traffic circles) and **block adjacency** between intersections—**not** as a physical centerline to project images onto or score perpendicular distance against.
   * Street blocks between intersections must be connected using **contiguous temporal slices of a single 360° camera sequence** (`captureTime` order) that passes directly from one intersection to the next, rather than synthetic centerline offset waypoints (`way_..._off_...`) or per-step centerline distance scoring.
+
+---
+
+## 7. Adding New Data or AI Providers
+
+StreetReaderAI is built around a **declarative plugin architecture** ([`docs/configuration.md`](docs/configuration.md)). When asked to add support for a new street imagery provider, geocoding/POI provider, or AI vision provider, follow this strict hierarchy:
+
+1. **Configure Declaratively in `streetreaderai.conf` First (Zero TypeScript Changes)**:
+   * [`ConfigService`](src/app/services/config_service.ts) automatically discovers any `[imagery.<name>]`, `[location.<name>]`, or `[ai.<name>]` section in `streetreaderai.conf`, as well as any custom key name under `[keys]` referenced via `requires_key = <key_name>`.
+   * Inspect a sample JSON response from the target API and map its URL templates (`{lat}`, `{lng}`, `{minLat}`, `{imageId}`, `{heading}`, `{pitch}`, `{apiKey}`, etc.) and JSON dot-paths (`items_path`, `id_field`, `lat_field`, `lng_field`, `capture_time_field`, `thumb_url_field`, etc.) into a `.conf` block:
+     * For **imagery providers**: Choose `retrieval_type = sequence` (for bbox + sequence APIs like Panoramax/Mapillary/KartaView) or `retrieval_type = image` (for single-coordinate nearest-image APIs), and `image_format = 360` (equirectangular sphere cropped in-browser) or `image_format = single` (server-cropped directional viewport).
+     * For **location providers**: Map `geocode_url`, `reverse_geocode_url`, `autocomplete_url`, and optional `nearby_url` (or omit `nearby_url` to use zero-call OpenStreetMap tile POI extraction).
+     * For **AI providers**: Any OpenAI Chat Completions–compatible API (including local Ollama, vLLM, OpenRouter, Together, etc.) works out of the box with `wire_format = openai` and a custom `endpoint_url` and `model_id`.
+2. **Verify with a Unit Test in [`src/app/services/provider_plugins_test.ts`](src/app/services/provider_plugins_test.ts)**:
+   * Add an offline unit test that passes the new `[imagery.<name>]` / `[location.<name>]` / `[ai.<name>]` snippet to `config.applyConfText(...)` with a mocked `fetch` response to verify field extraction and URL interpolation.
+3. **Avoid Provider-Specific Code Branches**:
+   * Do **not** add provider-specific `if (provider === '...')` branches or one-off flags to `ImageryProviderService` or `RouteProviderService`. If a new provider genuinely requires a new protocol capability (such as a new `wire_format` in `AiProviderService` or a new request/auth format), propose a generalizable mechanism and get explicit user approval first.

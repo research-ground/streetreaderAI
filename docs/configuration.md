@@ -112,3 +112,14 @@ Each `[ai.<name>]` section configures [`AiProviderService`](../src/app/services/
 | `wire_format` | Request/response schema format: `gemini` (Google Generative Language API) or `openai` (OpenAI-compatible Chat Completions API). |
 | `model_id` | Model identifier substituted into `{model}` or sent in the request body (`gemini-3.8-flash` or `gpt-5.6-terra`). |
 | `endpoint_url` | Full API endpoint URL template (supports `{model}` and `{apiKey}` placeholders). |
+
+---
+
+## 5. Adding a New Provider (No Code Required)
+
+`ConfigService` automatically registers every `[imagery.<name>]`, `[location.<name>]`, and `[ai.<name>]` section in `streetreaderai.conf`, along with any custom key names defined under `[keys]`. To add a new provider:
+
+1. **Add the API key (if required)** under `[keys]` using any descriptive name (e.g., `my_provider_key = ...`).
+2. **Define the plugin section** (`[imagery.my_provider]`, `[location.my_provider]`, or `[ai.my_provider]`) with its URL templates and JSON dot-path field mappings, referencing `requires_key = my_provider_key`.
+3. **Activate it** under `[system]` by setting `imagery_provider = my_provider`, `location_provider = my_provider`, or `ai_provider = my_provider`.
+4. **(Optional) Add a unit test** in [`src/app/services/provider_plugins_test.ts`](../src/app/services/provider_plugins_test.ts) using `config.applyConfText(...)` and a sample JSON payload to verify that all fields parse as expected.
