@@ -264,7 +264,7 @@ export class App implements OnInit, OnDestroy {
   }
 
   protected openSettings() {
-    this.dialog.open(SettingsDialog, { width: '500px' });
+    this.dialog.open(SettingsDialog, { width: '600px', maxWidth: '95vw' });
   }
 
   protected openHotkeys() {

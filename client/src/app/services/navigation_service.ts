@@ -64,6 +64,11 @@ export class NavigationService {
     this.land({ coordinates: { latitude: lat, longitude: lng }, heading });
   }
 
+  /** Clear cached session nodes when the imagery provider changes. */
+  clearSessionCache() {
+    this.nodeCache.clear();
+  }
+
   /** Navigate to a specific image id (deep link). */
   navigateToImage(imageId: string) {
     this.land({ imageId, heading: this.stateService.currentHeading() });

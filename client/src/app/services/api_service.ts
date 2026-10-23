@@ -15,14 +15,16 @@
  */
 
 import { Injectable, inject } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
-import { Observable } from 'rxjs';
+import { Observable, defer, from, of } from 'rxjs';
 import { tap } from 'rxjs/operators';
+import { AiProviderService } from './ai_provider_service';
+import { ConfigService } from './config_service';
+import { LocationProviderService } from './location_provider_service';
+import { RouteProviderService } from './route_provider_service';
 
 export interface AppRuntimeConfig {
   startingAddress: string;
   imageryProvider?: string;
-  demoMode?: boolean;
 }
 
 export interface AutocompleteItem {
@@ -105,7 +107,13 @@ export interface DescribeImageResponse {
 export interface AskQuestionResponse {
   success?: boolean;
   answer: string;
-  navigationalAction: 'TURN_LEFT' | 'TURN_RIGHT' | 'TURN_AROUND' | 'MOVE_FORWARD' | 'MOVE_BACKWARD' | 'NONE';
+  navigationalAction:
+    | 'TURN_LEFT'
+    | 'TURN_RIGHT'
+    | 'TURN_AROUND'
+    | 'MOVE_FORWARD'
+    | 'MOVE_BACKWARD'
+    | 'NONE';
 }
 
 export interface DebugNode {
@@ -147,28 +155,44 @@ export interface LocalGraphResponse {
 }
 
 @Injectable({
-  providedIn: 'root'
+  providedIn: 'root',
 })
 export class ApiService {
-  private http = inject(HttpClient);
-  private readonly apiUrl = '/v1/streetreader';
+  private readonly config = inject(ConfigService);
+  private readonly location = inject(LocationProviderService);
+  private readonly routeProvider = inject(RouteProviderService);
+  private readonly ai = inject(AiProviderService);
 
   getConfig(): Observable<AppRuntimeConfig> {
-    return this.http.get<AppRuntimeConfig>(`${this.apiUrl}:config`);
-  }
-
-  autocompleteAddress(query: string, sessionToken?: string): Observable<AutocompleteResponse> {
-    return this.http.post<AutocompleteResponse>(`${this.apiUrl}:autocompletePlace`, { 
-      query, 
-      session_token: sessionToken 
+    return of({
+      startingAddress: this.config.startingAddress(),
+      imageryProvider: this.config.imageryProvider(),
     });
   }
 
-  getLocalGraph(params: { lat: number; lng: number; radiusMeters?: number }): Observable<LocalGraphResponse> {
-    return this.http.post<LocalGraphResponse>(`${this.apiUrl}:getLocalGraph`, {
-      coordinates: { latitude: params.lat, longitude: params.lng },
-      radiusMeters: params.radiusMeters ?? 80,
-    });
+  autocompleteAddress(
+    query: string,
+    sessionToken?: string
+  ): Observable<AutocompleteResponse> {
+    return defer(() =>
+      from(this.location.autocomplete(query, sessionToken))
+    );
+  }
+
+  getLocalGraph(params: {
+    lat: number;
+    lng: number;
+    radiusMeters?: number;
+  }): Observable<LocalGraphResponse> {
+    return defer(() =>
+      from(
+        this.routeProvider.getLocalGraph(
+          params.lat,
+          params.lng,
+          params.radiusMeters ?? 80
+        )
+      )
+    );
   }
 
   getView(params: {
@@ -179,17 +203,17 @@ export class ApiService {
     heading?: number;
     pitch?: number;
   }): Observable<GetViewResponse> {
-    const payload: Record<string, unknown> = {
-      heading: params.heading,
-      pitch: params.pitch,
-    };
-    if (params.canonicalNodeId) payload['canonicalNodeId'] = params.canonicalNodeId;
-    if (params.imageId) payload['imageId'] = params.imageId;
-    if (params.address) payload['address'] = params.address;
-    if (params.coordinates) payload['coordinates'] = params.coordinates;
-
-    return this.http.post<GetViewResponse>(`${this.apiUrl}:generatePanoramaView`, payload).pipe(
-      tap(res => console.log('View node:', res.canonicalNodeId, 'image:', res.imageId, 'status:', res.status))
+    return defer(() => from(this.routeProvider.getPanoView(params))).pipe(
+      tap((res) =>
+        console.log(
+          'View node:',
+          res.canonicalNodeId,
+          'image:',
+          res.imageId,
+          'status:',
+          res.status
+        )
+      )
     );
   }
 
@@ -198,36 +222,29 @@ export class ApiService {
     heading?: number;
     pitch?: number;
   }): Observable<RenderViewResponse> {
-    return this.http.post<RenderViewResponse>(`${this.apiUrl}:renderView`, {
-      imageId: params.imageId,
-      heading: params.heading ?? 0,
-      pitch: params.pitch ?? 0,
-    });
+    return defer(() => from(this.routeProvider.renderView(params)));
   }
 
-  getNearbyPlaces(params: { lat: number; lng: number; radius?: number; heading?: number }): Observable<GetNearbyPlacesResponse> {
-    const payload = {
-      location: { latitude: params.lat, longitude: params.lng },
-      heading: params.heading,
-    };
-    return this.http.post<GetNearbyPlacesResponse>(`${this.apiUrl}:searchNearbyPlaces`, payload);
+  getNearbyPlaces(params: {
+    lat: number;
+    lng: number;
+    radius?: number;
+    heading?: number;
+  }): Observable<GetNearbyPlacesResponse> {
+    return defer(() => from(this.location.getNearbyPlaces(params)));
   }
 
   describeImage(imageBytes: string): Observable<DescribeImageResponse> {
-    return this.http.post<DescribeImageResponse>(
-      `${this.apiUrl}:describeImage`,
-      { image: imageBytes },
-    );
+    return defer(() => from(this.ai.describeImage(imageBytes)));
   }
 
-  askQuestion(imageBytes: string, question: string, detectActions: boolean = false): Observable<AskQuestionResponse> {
-    return this.http.post<AskQuestionResponse>(
-      `${this.apiUrl}:askQuestion`,
-      {
-        image: imageBytes,
-        question,
-        detect_navigational_intent: detectActions,
-      },
+  askQuestion(
+    imageBytes: string,
+    question: string,
+    detectActions: boolean = false
+  ): Observable<AskQuestionResponse> {
+    return defer(() =>
+      from(this.ai.askQuestion(imageBytes, question, detectActions))
     );
   }
 }
