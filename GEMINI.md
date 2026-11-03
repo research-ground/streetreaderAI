@@ -1,6 +1,12 @@
 # StreetReaderAI Agent Guidelines (GEMINI.md)
 
-Welcome! As an AI development assistant (Gemini, Antigravity, Jetski, etc.) working on the **StreetReaderAI** codebase, you must strictly adhere to the guidelines outlined in this document to maintain repository hygiene, avoid breaking existing configurations, and align with project practices.
+Welcome! As an AI development assistant (Gemini, Antigravity, Jetski, Google AI Studio, etc.) working on the **StreetReaderAI** codebase, you must strictly adhere to the guidelines outlined in this document to maintain repository hygiene, avoid breaking existing configurations, and align with project practices.
+
+> [!CAUTION]
+> **DO NOT REWRITE THE TECH STACK OR INTRODUCE REACT / OTHER FRAMEWORKS**
+> * **Keep the Existing Angular Stack**: StreetReaderAI is built with **Angular (`@angular/core`, `@angular/material`, standalone TypeScript components, Angular Signals, RxJS)** and a **Node/Express server shim (`src/server.ts`)**.
+> * **Strict Prohibition on Framework Migration**: Even if your host environment (such as Google AI Studio) defaults to React, **NEVER** rewrite or convert any part of this application to React (`react`, `react-dom`, `.tsx`/`.jsx`), Vue, Svelte, Next.js, or any other UI framework, and **NEVER** replace `angular.json`, `package.json` build scripts, `src/main.ts`, `src/index.html`, or `src/server.ts`.
+> * All UI, state, and service modifications must be implemented strictly within the existing Angular architecture under `src/app/` and `src/server.ts`.
 
 ---
 
@@ -38,7 +44,8 @@ Welcome! As an AI development assistant (Gemini, Antigravity, Jetski, etc.) work
 * **Reference**: [Google TypeScript Style Guide](https://google.github.io/styleguide/tsguide.html) contains the coding standards.
 * **Action**: Follow all rules regarding naming, structure, and imports detailed in the styleguide.
 
-### ⚛️ Angular Frontend
+### 🅰️ Angular Frontend (No React or Other Frameworks)
+* **Framework Lock**: Use Angular standalone components, templates, CSS, and TypeScript exclusively. Never add React dependencies, JSX/TSX files, or alternative bundler/framework scaffolds.
 * **Image Identifiers**: Always use `imageId` instead of the legacy `pano_id`-based system.
 
 ### ♿ Accessible Documentation
