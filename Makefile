@@ -13,9 +13,7 @@ help:
 
 setup:
 	npm install
-	@if [ ! -f models.conf ]; then cp models.conf.example models.conf && echo "==> Created models.conf from models.conf.example"; fi
-	@if [ ! -f streetreaderai.conf ]; then cp streetreaderai.conf.example streetreaderai.conf && echo "==> Created streetreaderai.conf from streetreaderai.conf.example"; fi
-	@echo "==> Setup complete. Edit models.conf to configure API keys and models, then run 'make start'."
+	@echo "==> Setup complete. Edit streetreaderai.conf to configure API keys and providers, then run 'make start'."
 
 build:
 	@echo "==> Building static Angular SPA into dist/..."

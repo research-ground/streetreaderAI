@@ -144,7 +144,7 @@ export class SceneDescriptionComponent implements OnDestroy {
         error: (err) => {
           console.error('Error fetching description:', err);
           const msg =
-            err instanceof Error && err.message.includes('API Key is not configured')
+            err instanceof Error && err.message
               ? err.message
               : 'An error occurred while fetching the description.';
           this.processDescription(msg, false);

@@ -25,9 +25,7 @@ coverage/
 .jetskicli/
 CLAUDE.md
 
-# Local archives & configuration (contains API keys)
+# Local archives & local provider overrides
 *.zip
-models.conf
 models.*.conf
-streetreaderai.conf
 streetreaderai.*.conf

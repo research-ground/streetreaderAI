@@ -6,16 +6,16 @@ This document is the single authoritative reference for the StreetReaderAI clien
 
 ## Architecture Overview
 
-StreetReaderAI executes as a **client-heavy Angular SPA paired with a lightweight Node.js/Express server-side key & proxy shim ([`src/server.ts`](../src/server.ts))**. All navigation, road-graph solving, equirectangular panorama projection, geocoding orchestration, and AI vision logic run in the browser through [`ApiService`](../src/app/services/api_service.ts), while API keys (`models.conf`) remain strictly on the server:
+StreetReaderAI executes as a **client-heavy Angular SPA paired with a lightweight Node.js/Express server-side key & proxy shim ([`src/server.ts`](../src/server.ts))**. All navigation, road-graph solving, equirectangular panorama projection, geocoding orchestration, and AI vision logic run in the browser through [`ApiService`](../src/app/services/api_service.ts), while API keys (`streetreaderai.conf`) remain strictly on the server:
 
-* [`src/server.ts`](../src/server.ts) — Express server shim that reads `models.conf` and `streetreaderai.conf` on the server, exposes `GET /api/config` (redacting secret keys into `__SERVER_KEY:<name>__` placeholders), and exposes `POST /api/proxy` (validating target hostnames, substituting real keys in server memory, and executing Gemini `generateContent` calls via `@google/genai`).
+* [`src/server.ts`](../src/server.ts) — Express server shim that reads `streetreaderai.conf` on the server, exposes `GET /api/config` (redacting secret keys into `__SERVER_KEY:<name>__` placeholders), and exposes `POST /api/proxy` (validating target hostnames, substituting real keys in server memory, and executing Gemini `generateContent` calls via `@google/genai`).
 * [`RouteProviderService`](../src/app/services/route_provider_service.ts) — 5-step intersection + sequence-slice routing solver.
 * [`RoadDataService`](../src/app/services/road_data_service.ts) — OpenStreetMap v0.6 `/api/0.6/map.json` road network and POI extractor (with Overpass fallback).
 * [`ImageryProviderService`](../src/app/services/imagery_provider_service.ts) — Declarative street imagery client configured by `[imagery.<name>]` in `streetreaderai.conf` (`retrieval_type = sequence | image`, `image_format = 360 | single`).
 * [`PanoramaCropService`](../src/app/services/panorama_crop_service.ts) — HTML5 `<canvas>` 360° equirectangular-to-rectilinear projection (`960×720`, `120°` FOV, with decoded `Uint8ClampedArray` pixel buffer caching).
 * [`LocationProviderService`](../src/app/services/location_provider_service.ts) — Declarative geocoding, reverse geocoding, autocomplete, and nearby POI client configured by `[location.<name>]` in `streetreaderai.conf`.
-* [`AiProviderService`](../src/app/services/ai_provider_service.ts) — Declarative multimodal scene description and visual Q&A client configured by `[ai.<name>]` in `streetreaderai.conf` and `[models]` in `models.conf` (Google Gemini `gemini-3.8-flash` or OpenAI-compatible `gpt-5.6-terra`).
-* [`ConfigService`](../src/app/services/config_service.ts) — Loads the merged, key-redacted configuration from `GET /api/config`, parses `[providers]`, `[models]`, `[system]`, `[keys]`, and declarative provider sections (`[imagery.*]`, `[location.*]`, `[ai.*]`), validates required keys on launch (`validateRequiredKeys()`), and routes key-bearing requests through `POST /api/proxy` via `proxiedFetch()`.
+* [`AiProviderService`](../src/app/services/ai_provider_service.ts) — Declarative multimodal scene description and visual Q&A client configured by `[ai.<name>]` in `streetreaderai.conf` (Google Gemini `gemini-3.5-flash-lite` by default or OpenAI-compatible `gpt-5.6-terra`).
+* [`ConfigService`](../src/app/services/config_service.ts) — Loads the key-redacted configuration from `GET /api/config`, parses `[system]`, `[keys]`, and declarative provider sections (`[imagery.*]`, `[location.*]`, `[ai.*]`), validates required keys on launch (`validateRequiredKeys()`), and routes key-bearing requests through `POST /api/proxy` via `proxiedFetch()`.
 
 ---
 
@@ -144,8 +144,8 @@ Pure viewport rendering method. Re-crops an already-known 360° panorama (`image
 ## 3. AI Services (`AiProviderService` / `ApiService`)
 
 ### `describeImage(imageBase64)`
-Generates an AI-powered visual description (2–3 sentences focused on street layout, buildings, and permanent features for blind travelers) and 4 scene-specific suggested follow-up questions using the configured AI provider:
-* **Google Gemini**: `gemini-3.8-flash`
+Generates an AI-powered visual description (2–3 sentences focused on street layout, buildings, and permanent features for blind travelers) and 3 scene-specific suggested follow-up questions using the configured AI provider:
+* **Google Gemini**: `gemini-3.5-flash-lite` (default)
 * **OpenAI**: `gpt-5.6-terra`
 
 **Response Interface (`DescribeImageResponse`):**
@@ -155,8 +155,7 @@ Generates an AI-powered visual description (2–3 sentences focused on street la
   "suggestedQuestions": [
     "What businesses are on the ground floor of the brick building ahead?",
     "Does the crosswalk to the left have a pedestrian signal?",
-    "Are there any obstacles or sandwich boards on the sidewalk?",
-    "What does the green street sign at the corner say?"
+    "Are there any obstacles or sandwich boards on the sidewalk?"
   ]
 }
 ```

@@ -17,7 +17,7 @@
 <div class="chat-container">
   <div class="messages-list" #scrollContainer role="log" aria-live="polite" aria-relevant="additions">
     @if (chatHistory().length === 0) {
-      <p class="empty-message">Ask a question about the current view, or press keys <strong>5&ndash;8</strong> below.</p>
+      <p class="empty-message">Ask a question about the current view, or press keys <strong>5&ndash;7</strong> below.</p>
     }
     @for (msg of chatHistory(); track msg.timestamp) {
       <div class="message" [ngClass]="msg.role">
@@ -62,7 +62,7 @@
 
   <div class="demo-questions-area" role="group" aria-label="Suggested questions for current location">
     <div class="demo-questions-header">
-      Suggested questions (press keys <strong>5&ndash;8</strong> or click):
+      Suggested questions (press keys <strong>5&ndash;7</strong> or click):
     </div>
     <div class="demo-questions-list">
       @for (q of demoService.activeQuestions(); track q.key) {

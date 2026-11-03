@@ -33,7 +33,7 @@ export const CHAT_PREAMBLE =
 export const DESCRIPTION_PROMPT = `
 Provide a brief (2-3 sentence) description of the current image for a blind traveler. Focus on the street layout, nearby buildings, storefronts, and permanent navigation features rather than ephemeral elements like weather or passing cars.
 
-Also generate 4 short, specific follow-up questions (under 12 words each) that the traveler might ask to learn more about concrete visual details actually visible in this scene (for example, asking about a specific visible storefront, sign, building feature, sidewalk layout, crossing, or landmark in the image). Do not ask generic questions about things that are not in the image, and do not simply repeat facts you already stated in the description.
+Also generate 3 short, specific follow-up questions (under 12 words each) that the traveler might ask to learn more about concrete visual details actually visible in this scene (for example, asking about a specific visible storefront, sign, building feature, sidewalk layout, crossing, or landmark in the image). Do not ask generic questions about things that are not in the image, and do not simply repeat facts you already stated in the description.
 `.trim();
 
 export function buildQuestionPrompt(
@@ -86,6 +86,76 @@ function stripDataUrlPrefix(base64OrDataUrl: string): string {
   return idx >= 0 ? base64OrDataUrl.slice(idx + 1) : base64OrDataUrl;
 }
 
+export function formatApiErrorResponse(
+  providerName: string,
+  status: number,
+  statusText: string,
+  rawBody: string
+): string {
+  const trimmed = (rawBody || '').trim();
+  let detail = '';
+  let statusCodeLabel = `HTTP ${status}`;
+
+  if (trimmed) {
+    try {
+      const parsed = JSON.parse(trimmed) as {
+        error?:
+          | string
+          | {
+              code?: number | string;
+              status?: string;
+              message?: string;
+            };
+        message?: string;
+      };
+      if (parsed && typeof parsed === 'object') {
+        if (typeof parsed.error === 'string') {
+          try {
+            const inner = JSON.parse(parsed.error) as {
+              error?: { code?: number | string; status?: string; message?: string };
+            };
+            if (inner?.error?.message) {
+              detail = inner.error.message;
+              if (inner.error.status) {
+                statusCodeLabel = `HTTP ${inner.error.code || status} (${inner.error.status})`;
+              }
+            } else {
+              detail = parsed.error;
+            }
+          } catch {
+            detail = parsed.error;
+          }
+        } else if (parsed.error && typeof parsed.error === 'object') {
+          detail = parsed.error.message || '';
+          if (parsed.error.status) {
+            statusCodeLabel = `HTTP ${parsed.error.code || status} (${parsed.error.status})`;
+          }
+        } else if (typeof parsed.message === 'string') {
+          detail = parsed.message;
+        }
+      }
+    } catch {
+      if (trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<html') || trimmed.startsWith('<')) {
+        detail = statusText || 'Service returned an HTML error page.';
+      } else {
+        detail = trimmed.slice(0, 300);
+      }
+    }
+  }
+
+  if (!detail) {
+    if (status === 503) {
+      detail = 'Service Unavailable — the model is overloaded or temporarily unavailable.';
+    } else if (status === 429) {
+      detail = 'Quota Exceeded / Rate Limited — API quota has been exhausted.';
+    } else {
+      detail = statusText || 'Request failed.';
+    }
+  }
+
+  return `${providerName} API error (${statusCodeLabel}): ${detail}`;
+}
+
 @Injectable({
   providedIn: 'root',
 })
@@ -107,7 +177,7 @@ export class AiProviderService {
     const key = this.config.getKeyByName(plugin.requiresKey);
     if (!key) {
       throw new Error(
-        `Missing required key "${plugin.requiresKey}" for AI provider "${plugin.name}". Set it in streetreaderai.conf or streetreaderai.local.conf.`
+        `Missing required key "${plugin.requiresKey}" for AI provider "${plugin.name}". Set it in streetreaderai.conf.`
       );
     }
     return key;
@@ -196,7 +266,7 @@ export class AiProviderService {
     if (!resp.ok) {
       const errBody = await resp.text();
       throw new Error(
-        `AI API error (HTTP ${resp.status}): ${errBody.slice(0, 200)}`
+        formatApiErrorResponse(plugin.name, resp.status, resp.statusText, errBody)
       );
     }
 
@@ -209,7 +279,7 @@ export class AiProviderService {
         ? parsed.suggestedQuestions
             .map((q: unknown) => String(q || '').trim())
             .filter(Boolean)
-            .slice(0, 4)
+            .slice(0, 3)
         : undefined;
       if (parsed?.description) {
         return {
@@ -270,7 +340,7 @@ export class AiProviderService {
     if (!resp.ok) {
       const errBody = await resp.text();
       throw new Error(
-        `AI API error (HTTP ${resp.status}): ${errBody.slice(0, 200)}`
+        formatApiErrorResponse(plugin.name, resp.status, resp.statusText, errBody)
       );
     }
 
@@ -352,7 +422,7 @@ export class AiProviderService {
     if (!resp.ok) {
       const errBody = await resp.text();
       throw new Error(
-        `AI API error (HTTP ${resp.status}): ${errBody.slice(0, 200)}`
+        formatApiErrorResponse(plugin.name, resp.status, resp.statusText, errBody)
       );
     }
 
@@ -364,7 +434,7 @@ export class AiProviderService {
         ? parsed.suggestedQuestions
             .map((q: unknown) => String(q || '').trim())
             .filter(Boolean)
-            .slice(0, 4)
+            .slice(0, 3)
         : undefined;
       if (parsed?.description) {
         return {
@@ -443,7 +513,7 @@ export class AiProviderService {
     if (!resp.ok) {
       const errBody = await resp.text();
       throw new Error(
-        `AI API error (HTTP ${resp.status}): ${errBody.slice(0, 200)}`
+        formatApiErrorResponse(plugin.name, resp.status, resp.statusText, errBody)
       );
     }
 

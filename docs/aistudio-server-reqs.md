@@ -27,7 +27,7 @@ Apps without this entry are treated as legacy projects making unproxied client-s
 
 In the server-side architecture, browser code is not permitted to handle `GEMINI_API_KEY` or call Google Generative Language endpoints directly:
 
-1. **Secrets Management**: The API key is attached directly to the container runtime via `process.env.GEMINI_API_KEY` (visible and configurable under the platform's **Settings > Secrets** panel) or loaded on the server from `models.conf` / `streetreaderai.conf` during local development.
+1. **Secrets Management**: The API key is attached directly to the container runtime via `process.env.GEMINI_API_KEY` (visible and configurable under the platform's **Settings > Secrets** panel) or loaded on the server from `streetreaderai.conf` during local development.
 2. **Server-Side Client**: `@google/genai` SDK instances and outbound API calls are executed strictly in the Node.js server layer (`src/server.ts`):
    ```ts
    import { GoogleGenAI } from '@google/genai';

@@ -156,17 +156,13 @@ google_maps_api_key =
     expect(err).toContain('google_maps_api_key (required by [location.google])');
   });
 
-  it('supports [providers] and [models] from models.conf and routes __SERVER_KEY placeholders through /api/proxy', async () => {
+  it('parses [keys] server placeholders in streetreaderai.conf and routes __SERVER_KEY requests through /api/proxy', async () => {
     const service = TestBed.inject(ConfigService);
     service.applyConfText(`
-[providers]
+[system]
 ai_provider = gemini
 imagery_provider = panoramax
 location_provider = osm
-
-[models]
-gemini_model = gemini-3.8-flash
-openai_model = gpt-5.6-terra
 
 [keys]
 gemini_api_key = __SERVER_KEY_ENV:gemini_api_key__
@@ -175,7 +171,7 @@ gemini_api_key = __SERVER_KEY_ENV:gemini_api_key__
     expect(service.aiProvider()).toBe('gemini');
     expect(service.isGeminiLocked()).toBe(true);
     expect(service.validateRequiredKeys()).toBeNull();
-    expect(service.getAiPlugin('gemini')?.modelId).toBe('gemini-3.8-flash');
+    expect(service.getAiPlugin('gemini')?.modelId).toBe('gemini-3.5-flash-lite');
 
     const origFetch = globalThis.fetch;
     const calls: Array<{ url: string; init?: RequestInit }> = [];
@@ -186,7 +182,7 @@ gemini_api_key = __SERVER_KEY_ENV:gemini_api_key__
 
     try {
       await service.proxiedFetch(
-        'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=__SERVER_KEY_ENV:gemini_api_key__',
+        'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=__SERVER_KEY_ENV:gemini_api_key__',
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

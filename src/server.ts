@@ -63,17 +63,9 @@ function readConfIfExists(filePath: string): string | null {
 export function loadServerConfigState(rootDir: string = process.cwd()): ServerConfigState {
   let sections = parseConfIni(DEFAULT_STREETREADER_CONF);
 
-  const confFiles = [
-    'streetreaderai.conf.example',
-    'models.conf.example',
-    'streetreaderai.conf',
-    'models.conf',
-  ];
-  for (const fileName of confFiles) {
-    const content = readConfIfExists(path.join(rootDir, fileName));
-    if (content) {
-      sections = parseConfIni(content, sections);
-    }
+  const content = readConfIfExists(path.join(rootDir, 'streetreaderai.conf'));
+  if (content) {
+    sections = parseConfIni(content, sections);
   }
 
   if (!sections['keys']) {
@@ -323,6 +315,20 @@ app.post('/api/proxy', async (req, res) => {
           : undefined,
     });
 
+    if (!upstreamResp.ok) {
+      const contentType = (upstreamResp.headers.get('content-type') || '').toLowerCase();
+      if (contentType.includes('text/html')) {
+        res.status(upstreamResp.status).json({
+          error: {
+            code: upstreamResp.status,
+            status: upstreamResp.statusText || 'UPSTREAM_ERROR',
+            message: `Upstream service ${targetHost} returned HTTP ${upstreamResp.status}${upstreamResp.statusText ? ` (${upstreamResp.statusText})` : ''}.`,
+          },
+        });
+        return;
+      }
+    }
+
     res.status(upstreamResp.status);
     const contentType = upstreamResp.headers.get('content-type');
     if (contentType) {
@@ -331,8 +337,33 @@ app.post('/api/proxy', async (req, res) => {
     const arrayBuf = await upstreamResp.arrayBuffer();
     res.send(Buffer.from(arrayBuf));
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    res.status(502).json({ error: message });
+    const rawStatus = (err as { status?: number })?.status;
+    const rawMsg = err instanceof Error ? err.message : String(err);
+    try {
+      const parsed = JSON.parse(rawMsg) as {
+        error?: { code?: number; status?: string; message?: string };
+      };
+      if (parsed && typeof parsed === 'object' && parsed.error) {
+        const code =
+          typeof rawStatus === 'number' && rawStatus >= 400
+            ? rawStatus
+            : typeof parsed.error.code === 'number' && parsed.error.code >= 400
+              ? parsed.error.code
+              : 502;
+        res.status(code).json({ error: parsed.error });
+        return;
+      }
+    } catch {
+      // Not a JSON error string from @google/genai SDK
+    }
+    const status =
+      typeof rawStatus === 'number' && rawStatus >= 400 ? rawStatus : 502;
+    res.status(status).json({
+      error: {
+        code: status,
+        message: rawMsg,
+      },
+    });
   }
 });
 

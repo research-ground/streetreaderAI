@@ -62,7 +62,7 @@ import { ChatComponent } from '../chat/chat';
   styles: [`
     .floating-palette {
       position: absolute;
-      top: 12px;
+      top: 8px;
       width: 320px;
       z-index: 5;
     }
@@ -71,19 +71,19 @@ import { ChatComponent } from '../chat/chat';
     .palette-panel {
       background: rgba(255, 255, 255, 0.9) !important;
       backdrop-filter: blur(4px);
-      margin-bottom: 4px;
+      margin-bottom: 3px;
     }
     .palette-content { padding: 0; }
     mat-panel-title {
       font-weight: 500;
-      font-size: 14px;
+      font-size: 13.5px;
     }
     ::ng-deep .mat-expansion-panel-body {
-      padding: 0 12px 12px 12px !important;
+      padding: 0 10px 8px 10px !important;
     }
     ::ng-deep .mat-expansion-panel-header {
-      height: 36px !important;
-      padding: 0 12px !important;
+      height: 32px !important;
+      padding: 0 10px !important;
     }
   `]
 })

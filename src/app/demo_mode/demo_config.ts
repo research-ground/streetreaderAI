@@ -15,7 +15,7 @@
  */
 
 export interface DemoQuestion {
-  /** Number key ('5' - '8') mapped to trigger this preset question. */
+  /** Number key ('5' - '7') mapped to trigger this preset question. */
   key: string;
   /** Short badge label shown on the button. */
   label: string;
@@ -52,23 +52,18 @@ export const GENERIC_QUESTIONS: DemoQuestion[] = [
     label: 'Street environment',
     question: 'Describe the buildings, trees, and street layout on this block.',
   },
-  {
-    key: '8',
-    label: 'Walk forward (AI nav)',
-    question: 'Move forward down the street.',
-  },
 ];
 
 export const DEMO_LOCATIONS: DemoLocation[] = [
   {
     key: '1',
-    id: 'seattle-fremont-google',
-    title: 'Seattle — Fremont (N 34th St)',
-    subtitle: 'USA · Fremont Ave N & N 34th St intersection',
-    address: '601 N 34th St, Seattle, WA',
-    latitude: 47.64948,
-    longitude: -122.34979,
-    heading: 107,
+    id: 'seattle-belltown-fifth-ave',
+    title: 'Seattle — Belltown (5th Ave Monorail)',
+    subtitle: 'USA · Monorail corridor & downtown Belltown',
+    address: '2110 5th Ave, Seattle, WA',
+    latitude: 47.61494,
+    longitude: -122.34073,
+    heading: 132,
     questions: GENERIC_QUESTIONS,
   },
   {

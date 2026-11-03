@@ -37,7 +37,6 @@ import { ToastService } from './services/toast_service';
 import { SettingsDialog } from './components/settings_dialog/settings_dialog';
 import { HotkeysDialog } from './components/hotkeys_dialog/hotkeys_dialog';
 import { WelcomeDialogComponent } from './components/welcome_dialog/welcome_dialog';
-import { ActivationDialogComponent } from './components/activation_dialog/activation_dialog';
 import { ErrorDialogComponent } from './components/error_dialog/error_dialog';
 import { PaletteComponent } from './components/palette/palette';
 import { RadarViewComponent } from './components/radar_view/radar_view';
@@ -80,7 +79,7 @@ export class App implements OnInit, OnDestroy {
   private dialog = inject(MatDialog);
 
   private commandSubscription?: Subscription;
-  private startingAddress = '601 N 34th St, Seattle, WA';
+  private startingAddress = '2110 5th Ave, Seattle, WA';
 
   protected leftComponents = computed(() => this.uiService.getComponentsBySide('left'));
   protected rightComponents = computed(() => this.uiService.getComponentsBySide('right'));
@@ -143,9 +142,6 @@ export class App implements OnInit, OnDestroy {
 
     if (this.stateService.showWelcome()) {
       this.openWelcome();
-    } else if (this.speechOutputService.enabled()) {
-      // If welcome is off but TTS is on, we need an interaction to unlock audio
-      this.openActivationDialog();
     }
 
     const loadStartingLocation = (addr: string) => {
@@ -163,7 +159,7 @@ export class App implements OnInit, OnDestroy {
 
     this.apiService.getConfig().subscribe({
       next: (cfg) => {
-        this.startingAddress = cfg.startingAddress || '601 N 34th St, Seattle, WA';
+        this.startingAddress = cfg.startingAddress || '2110 5th Ave, Seattle, WA';
         loadStartingLocation(this.startingAddress);
       },
       error: () => {
@@ -190,26 +186,6 @@ export class App implements OnInit, OnDestroy {
       const addr = this.stateService.state().address || this.startingAddress;
       this.speechOutputService.speak(
         `Street Reader A I initialized. You are at ${addr}.`
-      );
-      if (this.stateService.autoDescribe()) {
-        this.descriptionService.needsRefresh(false);
-      }
-    });
-  }
-
-  protected openActivationDialog() {
-    this.stateService.setActivationDialog(true);
-    const dialogRef = this.dialog.open(ActivationDialogComponent, {
-      width: '450px',
-      disableClose: true,
-      autoFocus: true
-    });
-
-    dialogRef.afterClosed().subscribe(() => {
-      this.stateService.setActivationDialog(false);
-      const addr = this.stateService.state().address || this.startingAddress;
-      this.speechOutputService.speak(
-        `Speech activated. You are at ${addr}.`
       );
       if (this.stateService.autoDescribe()) {
         this.descriptionService.needsRefresh(false);

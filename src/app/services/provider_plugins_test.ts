@@ -16,7 +16,7 @@
 
 import { TestBed } from '@angular/core/testing';
 import { vi } from 'vitest';
-import { AiProviderService } from './ai_provider_service';
+import { AiProviderService, formatApiErrorResponse } from './ai_provider_service';
 import { clearAllClientCaches } from './client_cache';
 import { ConfigService } from './config_service';
 import { ImageryProviderService } from './imagery_provider_service';
@@ -353,5 +353,49 @@ openai_api_key = TestOpenAiKey
     expect(descRes.description).toBe(
       'Brick storefront with a coffee shop awning.'
     );
+  });
+
+  it('formatApiErrorResponse preserves HTTP 503, 429, and strips raw HTML error bodies', () => {
+    const err503 = formatApiErrorResponse(
+      'gemini',
+      503,
+      'Service Unavailable',
+      JSON.stringify({
+        error: {
+          code: 503,
+          status: 'UNAVAILABLE',
+          message: 'The model is overloaded. Please try again later.',
+        },
+      })
+    );
+    expect(err503).toContain('HTTP 503 (UNAVAILABLE)');
+    expect(err503).toContain('The model is overloaded. Please try again later.');
+
+    const err429 = formatApiErrorResponse(
+      'gemini',
+      429,
+      'Too Many Requests',
+      JSON.stringify({
+        error: JSON.stringify({
+          error: {
+            code: 429,
+            status: 'RESOURCE_EXHAUSTED',
+            message: 'You exceeded your current quota.',
+          },
+        }),
+      })
+    );
+    expect(err429).toContain('HTTP 429 (RESOURCE_EXHAUSTED)');
+    expect(err429).toContain('You exceeded your current quota.');
+
+    const errHtml = formatApiErrorResponse(
+      'gemini',
+      503,
+      'Service Unavailable',
+      '<!DOCTYPE html><html><body>503 Service Unavailable</body></html>'
+    );
+    expect(errHtml).toContain('HTTP 503');
+    expect(errHtml).toContain('Service Unavailable');
+    expect(errHtml).not.toContain('<!DOCTYPE');
   });
 });

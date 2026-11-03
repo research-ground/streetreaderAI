@@ -18,14 +18,14 @@ Welcome! As an AI development assistant (Gemini, Antigravity, Jetski, etc.) work
 * If the dev server is not running when executing browser tools or interactive checks, spin it up in the background (`make start`) rather than asking the developer to manually launch it.
 
 ### 🔑 API & Security Guidelines
-* **External Service Keys**: Active provider selections (`panoramax`, `mapillary`, `osm`, `google`, `gemini`, `openai`), model IDs (`gemini_model`, `openai_model`), and API keys are configured in `models.conf` (git-ignored, templated from `models.conf.example`), while system settings and declarative provider plugin definitions live in `streetreaderai.conf` (templated from `streetreaderai.conf.example`).
-* **Server-Side Key Isolation**: `models.conf` and `streetreaderai.conf` are read on the server by `src/server.ts`. Real API keys must never be exposed to the browser; `GET /api/config` replaces non-empty keys with `__SERVER_KEY:<name>__` placeholders, and `POST /api/proxy` substitutes real keys on the server.
+* **Single Unified Config (`streetreaderai.conf`)**: Active provider selections (`panoramax`, `mapillary`, `osm`, `google`, `gemini`, `openai`), model IDs (`model_id` under `[ai.*]`), API keys (`[keys]`), system settings (`[system]`), and declarative provider plugin definitions all live in a single checked-in keyless file: `streetreaderai.conf` (no `.conf.example` files). Local key edits are kept out of commits with `git update-index --skip-worktree streetreaderai.conf`.
+* **Server-Side Key Isolation**: `streetreaderai.conf` is read on the server by `src/server.ts`. Real API keys must never be exposed to the browser; `GET /api/config` replaces non-empty keys with `__SERVER_KEY:<name>__` placeholders, and `POST /api/proxy` substitutes real keys on the server.
+* **Transparent Error Reporting**: Never obscure upstream API HTTP status codes or explanations (`503`, `429`, etc.), and never forward raw HTML error pages from `src/server.ts`.
 * **Obtaining Keys**: The developer (user) can and will provide actual, functional API keys (e.g. Google Maps, Gemini, and Mapillary keys) when requested by the agent.
 * Avoid hardcoding any credentials or API keys in source files.
 
-### 🤖 Gemini AI Model Selection
-* **Preferred Model**: The **sole preferred and authorized model** for all Gemini AI service features (e.g., scene description, interactive chat, and Q&A) is **`gemini-3.8-flash`**.
-* **Model ID Override**: Agents must always configure and reference **`gemini-3.8-flash`** as the active model, even if their static knowledge base is unaware of its existence or lists it as unreleased.
+### 🤖 Gemini AI Model & Speech Defaults
+* **Default Model**: Due to tightened API quotas, the default Gemini model in `streetreaderai.conf` and `ConfigService` is **`gemini-3.5-flash-lite`**, and `SpeechOutputService` defaults to a local OS voice (`localService`). Do not proactively change the model configuration unless explicitly instructed by the developer.
 
 ---
 
@@ -57,8 +57,8 @@ Welcome! As an AI development assistant (Gemini, Antigravity, Jetski, etc.) work
 ## 5. Local Setup & Testing Guidelines
 
 ### 🛠️ Setting Up The Repository
-* **Automated Setup**: Run `make setup` (or `npm install`) to install Node.js packages at the repository root and create `models.conf` (from `models.conf.example`) and `streetreaderai.conf` (from `streetreaderai.conf.example`).
-* **Configuration**: External service providers, model versions, and API keys are configured in `models.conf`; system settings and declarative provider URL/JSON mappings are configured in `streetreaderai.conf`.
+* **Automated Setup**: Run `make setup` (or `npm install`) to install Node.js packages at the repository root.
+* **Configuration**: All external service providers, model versions, API keys, system settings, and declarative provider URL/JSON mappings are configured in `streetreaderai.conf` (checked into git without keys; use `git update-index --skip-worktree streetreaderai.conf` locally when adding personal keys).
 
 ### 🧪 Running Tests
 Always run the local test suite when making changes to verify correctness before pushing:

@@ -61,10 +61,11 @@ export class SpeechOutputService {
         }
 
         if (availableVoices.length > 0 && !this.currentVoice()) {
-          // Prefer 'Google US English' if available, then any English voice, then fallback to first available
-          const googleUS = availableVoices.find(v => v.name === 'Google US English');
+          // Prefer a local OS English voice first, then any local voice, then any English voice
+          const localEnglish = availableVoices.find(v => v.localService && v.lang.startsWith('en'));
+          const anyLocal = availableVoices.find(v => v.localService);
           const englishVoice = availableVoices.find(v => v.lang.startsWith('en'));
-          this.currentVoice.set(googleUS || englishVoice || availableVoices[0]);
+          this.currentVoice.set(localEnglish || anyLocal || englishVoice || availableVoices[0]);
         }
       };
 
@@ -131,9 +132,10 @@ export class SpeechOutputService {
       const availableVoices = this.synthesis.getVoices();
       if (availableVoices.length > 0) {
         this.voices.set(availableVoices);
-        const googleUS = availableVoices.find(v => v.name === 'Google US English');
+        const localEnglish = availableVoices.find(v => v.localService && v.lang.startsWith('en'));
+        const anyLocal = availableVoices.find(v => v.localService);
         const englishVoice = availableVoices.find(v => v.lang.startsWith('en'));
-        const defaultVoice = googleUS || englishVoice || availableVoices[0];
+        const defaultVoice = localEnglish || anyLocal || englishVoice || availableVoices[0];
         this.currentVoice.set(defaultVoice);
       } else {
         console.warn('[SpeechService] No voices available to speak with.');

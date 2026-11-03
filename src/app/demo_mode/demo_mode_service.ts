@@ -44,7 +44,7 @@ export class DemoModeService {
   readonly activeQuestions = computed<DemoQuestion[]>(() => {
     const llmQuestions = this.stateService.state().suggestedQuestions;
     if (llmQuestions && llmQuestions.length > 0) {
-      return llmQuestions.slice(0, 4).map((q, idx) => ({
+      return llmQuestions.slice(0, 3).map((q, idx) => ({
         key: String(5 + idx),
         label: q,
         question: q,

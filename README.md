@@ -20,8 +20,10 @@
 Because the repository is public and uses open defaults (**Panoramax** for 360° street imagery and **OpenStreetMap** for road routing, geocoding, and POIs), you can run StreetReaderAI directly in **Google AI Studio** with zero paid APIs or credit card required:
 
 1. Open **[Google AI Studio](https://aistudio.google.com/)** (**Build**) and import this public GitHub repository (`https://github.com/research-ground/streetreaderAI`), or generate a clean archive locally with `make make-for-aistudio` and import `streetreaderai-aistudio.zip`.
-2. **Automatic Setup**: StreetReaderAI uses its built-in defaults (**Panoramax** + **OpenStreetMap**) and automatically detects AI Studio's injected `GEMINI_API_KEY` (`gemini-3.8-flash`)—no configuration file is required.
+2. **Automatic Setup**: StreetReaderAI reads [`streetreaderai.conf`](streetreaderai.conf) (**Panoramax** + **OpenStreetMap**) and automatically detects AI Studio's injected `GEMINI_API_KEY` (`gemini-3.5-flash-lite`)—no extra setup is required.
 3. **Sharing or Deploying**: Click **Share** in AI Studio to share your applet link with others, or click **Deploy to Cloud Run** in the top-right corner of AI Studio for a standalone hosted URL.
+
+> **Default Model & Voice Quota Note**: Due to tightened Google API rate limits and free-tier quotas, StreetReaderAI defaults to **`gemini-3.5-flash-lite`** (`model_id = gemini-3.5-flash-lite` under `[ai.gemini]` in `streetreaderai.conf`) and a **local operating-system speech synthesis voice** (`SpeechSynthesisVoice.localService`) rather than cloud TTS voices. You can switch to another Gemini model (e.g., `gemini-3.8-flash`) or OpenAI in `streetreaderai.conf` if your account has higher quota.
 
 ### Option 2: Run Locally
 
@@ -31,21 +33,19 @@ Because the repository is public and uses open defaults (**Panoramax** for 360°
 
 #### Install, Configure & Launch
 ```bash
-# 1. Install dependencies and create models.conf & streetreaderai.conf from .example templates
+# 1. Install dependencies
 make setup
 ```
 
-Open `models.conf` in any text editor to select your active providers, model versions, and API keys:
+Open [`streetreaderai.conf`](streetreaderai.conf) in any text editor to select your active providers, model IDs, and API keys in one place:
 
 ```ini
-[providers]
-ai_provider = gemini
+[system]
 imagery_provider = panoramax
 location_provider = osm
-
-[models]
-gemini_model = gemini-3.8-flash
-openai_model = gpt-5.6-terra
+ai_provider = gemini
+starting_address = 2110 5th Ave, Seattle, WA
+max_poi_items = 3
 
 [keys]
 gemini_api_key = YOUR_GEMINI_API_KEY
@@ -54,17 +54,17 @@ mapillary_token =
 google_maps_api_key =
 ```
 
-> **Note**: StreetReaderAI reads `models.conf` (and `streetreaderai.conf`) **exclusively on the Node.js server (`src/server.ts`)** so your personal API keys are never sent to the browser. Both `models.conf` and `streetreaderai.conf` are git-ignored so secrets are never committed (always edit `models.conf` rather than `models.conf.example`). If a required key for the active providers in `[providers]` is missing on launch, StreetReaderAI displays a **Configuration Error** dialog identifying which key to add.
+> **Note on `streetreaderai.conf` & Local API Keys**: A keyless `streetreaderai.conf` is checked directly into git (rather than `.conf.example`) so cloud IDEs like Google AI Studio can import the repository cleanly without renaming files. `streetreaderai.conf` is read **exclusively on the Node.js server (`src/server.ts`)** so your personal API keys are never sent to the browser. Before adding personal keys locally, run `git update-index --skip-worktree streetreaderai.conf` so git ignores your local edits to `streetreaderai.conf`. If a required key for an active provider is missing on launch, StreetReaderAI displays a **Configuration Error** dialog identifying which key to add.
 
 #### Changing AI, Imagery, or Location Providers
-All provider selections, model versions, and API keys are controlled in `models.conf` (rather than in the browser UI) so credentials stay on the server:
+All provider selections, model versions, and API keys are controlled in [`streetreaderai.conf`](streetreaderai.conf) (rather than in the browser UI) so credentials stay on the server:
 * **Switch AI Provider (`gemini` ↔ `openai`)**:
-  1. In `models.conf`, set `ai_provider = openai` (or `ai_provider = gemini`) under `[providers]`.
+  1. In `streetreaderai.conf`, set `ai_provider = openai` (or `ai_provider = gemini`) under `[system]`.
   2. Add the corresponding API key (`openai_api_key = sk-...` or `gemini_api_key = AIza...`) under `[keys]`.
-  3. *(Optional)* Customize the model version under `[models]` (e.g., `gemini_model = gemini-3.8-flash` or `openai_model = gpt-5.6-terra`).
+  3. *(Optional)* Customize `model_id` under `[ai.gemini]` (default `gemini-3.5-flash-lite`) or `[ai.openai]` (default `gpt-5.6-terra`).
 * **Switch Street Imagery or Location Provider**:
-  * Set `imagery_provider = panoramax | mapillary | google` and `location_provider = osm | google` under `[providers]`, and supply `mapillary_token` or `google_maps_api_key` under `[keys]` if required.
-* **Apply Changes**: Save `models.conf` and refresh the browser page (`src/server.ts` re-reads `models.conf` on every page load—no server restart required). See **[Configuring Data & AI Providers](docs/configuration.md)** for full details on switching or adding custom providers.
+  * Set `imagery_provider = panoramax | mapillary | google` and `location_provider = osm | google` under `[system]`, and supply `mapillary_token` or `google_maps_api_key` under `[keys]` if required.
+* **Apply Changes**: Save `streetreaderai.conf` and refresh the browser page (`src/server.ts` re-reads `streetreaderai.conf` on every page load—no server restart required). See **[Configuring Data & AI Providers](docs/configuration.md)** for full details on switching or adding custom providers.
 
 Start the development server:
 
@@ -89,7 +89,7 @@ When StreetReaderAI opens for the first time, the **Welcome** dialog lets you co
 
 ### 2. Jumping to a Location
 * **Address Search**: Press `Mod + L` (or select the **Address Search** box in the top-left **Navigation** panel), type an address or landmark, and press `Enter`.
-* **Preset Locations**: Press number keys `1` through `4` (when not typing in a text box) or click one of the four preset location buttons in the **Navigation** panel to jump immediately to curated streets in Seattle, Paris, Amsterdam, or Brussels.
+* **Preset Locations**: Press number keys `1` through `4` (when not typing in a text box) or click one of the four preset location buttons in the **Navigation** panel to jump immediately to curated streets in Paris, Amsterdam, Lyon, or Seattle.
 
 ### 3. Walking & Turning Along the Street
 * **Move Forward**: Press `↑` (Up Arrow) or `Mod + ↑` to step forward (~18 meters) along the current street block toward the next intersection.
@@ -104,7 +104,7 @@ When StreetReaderAI opens for the first time, the **Welcome** dialog lets you co
 ### 5. Asking Visual Questions & Voice Input
 * **Ask a Question**: Press `Mod + K` to focus the **Chat & AI Controls** input box, type any question about what is visible in the scene, and press `Enter`.
 * **Voice Input**: Press `Mod + B` (or click the microphone button) to speak your question or navigation command.
-* **Preset Questions**: Press number keys `5` through `8` (when not typing in a text box) to ask one of the four suggested questions for the current location.
+* **Preset Questions**: Press number keys `5` through `7` (when not typing in a text box) to ask one of the three suggested questions for the current location.
 
 ### 6. Screen Curtain & Keyboard Shortcut Help
 * **Screen Curtain**: Press `Mod + T` to black out the visual interface so sighted researchers or developers can experience the non-visual interaction flow.
@@ -118,16 +118,15 @@ StreetReaderAI uses a **client-heavy Angular Single-Page Application (SPA) paire
 
 * **Why Client + Server Shim?**: Originally, StreetReaderAI ran 100% in the browser. However, Google AI Studio requires all Gemini API calls to execute on the server (`MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API` in [`metadata.json`](metadata.json)), and keeping API keys (`gemini_api_key`, `openai_api_key`, `mapillary_token`, `google_maps_api_key`) strictly on the server prevents secrets from ever leaking into browser bundles or DevTools network logs. To preserve the simplicity of the client-side architecture without duplicating provider logic on the server:
   * **All navigation, road-graph solving, and 360° `<canvas>` panorama projection remain 100% client-side** (`RenderMode.Client` in [`src/main.server.ts`](src/main.server.ts)).
-  * **Server-Side Key & Proxy Shim ([`src/server.ts`](src/server.ts))**: Reads `models.conf` and `streetreaderai.conf` on the server and exposes two lightweight routes:
-    1. `GET /api/config`: Serves the merged configuration to the browser with all non-empty `[keys]` replaced by opaque placeholders (`__SERVER_KEY:<key_name>__`).
-    2. `POST /api/proxy`: Accepts outbound API requests containing `__SERVER_KEY:...__` placeholders, validates the target hostname against the allowlist of configured provider domains, substitutes the real API key in server memory, and executes Gemini `generateContent` requests via the official `@google/genai` SDK (`User-Agent: aistudio-build`). Public key-free requests (such as OpenStreetMap and Panoramax) still go directly from the browser.
-* **Declarative Two-File Configuration (`models.conf` + `streetreaderai.conf`)**:
-  * **[`models.conf`](models.conf.example)**: Top-level configuration for selecting active `[providers]` (`ai_provider`, `imagery_provider`, `location_provider`), `[models]` (`gemini_model`, `openai_model`), and secret `[keys]`.
-  * **[`streetreaderai.conf`](streetreaderai.conf.example)**: System defaults (`starting_address`, `max_poi_items`) and declarative URL templates / JSON dot-path field mappings for four external service categories:
+  * **Server-Side Key & Proxy Shim ([`src/server.ts`](src/server.ts))**: Reads `streetreaderai.conf` on the server and exposes two lightweight routes:
+    1. `GET /api/config`: Serves the configuration to the browser with all non-empty `[keys]` replaced by opaque placeholders (`__SERVER_KEY:<key_name>__`).
+    2. `POST /api/proxy`: Accepts outbound API requests containing `__SERVER_KEY:...__` placeholders, validates the target hostname against the allowlist of configured provider domains, substitutes the real API key in server memory, and executes Gemini `generateContent` requests via the official `@google/genai` SDK (`User-Agent: aistudio-build`), preserving upstream HTTP error codes and explanations (`503`, `429`, etc.). Public key-free requests (such as OpenStreetMap and Panoramax) still go directly from the browser.
+* **Single Unified Configuration ([`streetreaderai.conf`](streetreaderai.conf))**:
+  * Configures `[system]` (`imagery_provider`, `location_provider`, `ai_provider`, `starting_address`, `max_poi_items`), secret `[keys]`, and declarative URL templates / JSON dot-path field mappings for four external service categories:
     1. **Road Network & Routing ([`RoadDataService`](src/app/services/road_data_service.ts) & [`RouteProviderService`](src/app/services/route_provider_service.ts))**: Fetches local walkable/drivable street geometry from the OpenStreetMap v0.6 API (`/api/0.6/map.json`, with Overpass API fallback), merges multi-node junctions into unified intersections (`osm_<id>`), and connects adjacent intersections using validated camera sequences (`seq_<imageId>`).
     2. **Street-Level Imagery ([`ImageryProviderService`](src/app/services/imagery_provider_service.ts) & [`PanoramaCropService`](src/app/services/panorama_crop_service.ts))**: Supports both sequence-based 360° equirectangular providers (`retrieval_type = sequence`, `image_format = 360`, such as **Panoramax** and **Mapillary**, cropped into rectilinear viewports in-browser via HTML5 `<canvas>`) and point-sampled directional providers (`retrieval_type = image`, `image_format = single`).
     3. **Geocoding & Points of Interest ([`LocationProviderService`](src/app/services/location_provider_service.ts))**: Handles forward/reverse geocoding, debounced address autocomplete, and observer-relative POI discovery using **OpenStreetMap** (Nominatim + zero-extra-call extraction from cached OSM road tiles) or **Google Maps Platform** (Geocoding + Places API v1).
-    4. **Multimodal Vision-Language Model ([`AiProviderService`](src/app/services/ai_provider_service.ts))**: Sends the current viewport image to **Google Gemini** (`gemini-3.8-flash`) or **OpenAI** (`gpt-5.6-terra`) through `/api/proxy` to generate blind-traveler-oriented scene descriptions and structured visual Q&A responses with optional navigation action detection.
+    4. **Multimodal Vision-Language Model ([`AiProviderService`](src/app/services/ai_provider_service.ts))**: Sends the current viewport image to **Google Gemini** (`gemini-3.5-flash-lite` by default) or **OpenAI** (`gpt-5.6-terra`) through `/api/proxy` to generate blind-traveler-oriented scene descriptions and structured visual Q&A responses with optional navigation action detection.
 * **In-Browser Caching ([`client_cache.ts`](src/app/services/client_cache.ts))**: Multi-layer in-memory LRU caches (`roadCache`, `osmPoiTileCache`, `windowCache`, `metadataCache`, `graphCache`, and `PanoramaCropService`'s decoded pixel buffer cache) plus `singleflight` request deduplication ensure that exploring a neighborhood or rotating in place minimizes external API calls.
 
 ---
@@ -147,7 +146,7 @@ All tests run offline in Vitest + Angular `TestBed` without requiring live API k
 * **Routing & 5-Step Graph Solver ([`src/app/services/route_provider_service_test.ts`](src/app/services/route_provider_service_test.ts))**: Tests street name normalization, OSM intersection clustering, sequence slicing across street blocks (`retrieval_type = sequence`), point-sampled block solving (`retrieval_type = image`), street-hint seed selection, zero-network-call POI extraction from cached OSM road tiles, and single-tile reuse across movements.
 * **Declarative Provider Plugins ([`src/app/services/provider_plugins_test.ts`](src/app/services/provider_plugins_test.ts))**: Verifies that `ImageryProviderService`, `LocationProviderService`, and `AiProviderService` execute custom `.conf` plugins across `sequence`/`360`, `image`/`single`, custom geocoding/autocomplete dot-paths, and `gemini`/`openai` wire formats.
 * **Configuration & Key Validation ([`src/app/services/config_service_test.ts`](src/app/services/config_service_test.ts))**: Tests `streetreaderai.conf` INI parsing, default provider setup, AI Studio host environment key injection, and missing-key error reporting (`validateRequiredKeys()`).
-* **Demo Mode & Preset Shortcuts ([`src/app/demo_mode/demo_mode_test.ts`](src/app/demo_mode/demo_mode_test.ts))**: Verifies hotkeys `1`–`4` (preset locations) and `5`–`8` (preset visual questions), fallback to generic questions on custom address search, and preset button rendering.
+* **Demo Mode & Preset Shortcuts ([`src/app/demo_mode/demo_mode_test.ts`](src/app/demo_mode/demo_mode_test.ts))**: Verifies hotkeys `1`–`4` (preset locations) and `5`–`7` (preset visual questions), fallback to generic questions on custom address search, and preset button rendering.
 * **UI Component Tests (`src/app/components/**/*_test.ts`, [`src/app/app_test.ts`](src/app/app_test.ts))**: Component creation and behavior tests for `App`, `NavigationComponent`, `PoiListComponent` (including `maxPoiItems` filtering), `SceneDescriptionComponent`, and `AdjacentLinksComponent`.
 
 ---

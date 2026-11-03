@@ -31,7 +31,7 @@ interface Projected {
   imports: [CommonModule],
   template: `
     <div class="radar-card" aria-hidden="true">
-      <svg width="200" height="200" viewBox="0 0 240 240" class="radar-svg">
+      <svg width="100" height="100" viewBox="0 0 240 240" class="radar-svg">
         <!-- Range rings & cardinal crosshairs -->
         <circle cx="120" cy="120" r="50" fill="none" stroke="rgba(148, 163, 184, 0.14)" stroke-width="1" stroke-dasharray="2,2" />
         <circle cx="120" cy="120" r="100" fill="none" stroke="rgba(148, 163, 184, 0.14)" stroke-width="1" stroke-dasharray="2,2" />
@@ -104,12 +104,12 @@ interface Projected {
       position: absolute;
       bottom: 12px;
       right: 12px;
-      z-index: 5;
+      z-index: 2;
       background: rgba(15, 23, 42, 0.88);
       backdrop-filter: blur(6px);
       border: 1px solid rgba(148, 163, 184, 0.28);
-      border-radius: 10px;
-      padding: 6px;
+      border-radius: 8px;
+      padding: 4px;
       box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
       pointer-events: none;
       user-select: none;

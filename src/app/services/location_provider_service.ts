@@ -111,7 +111,7 @@ export class LocationProviderService {
     const key = this.config.getKeyByName(plugin.requiresKey);
     if (!key) {
       throw new Error(
-        `Missing required key "${plugin.requiresKey}" for location provider "${plugin.name}". Set it in streetreaderai.conf or streetreaderai.local.conf.`
+        `Missing required key "${plugin.requiresKey}" for location provider "${plugin.name}". Set it in streetreaderai.conf.`
       );
     }
     return key;
@@ -163,16 +163,32 @@ export class LocationProviderService {
       });
       if (resp.status === 429) {
         throw new Error(
-          'Geocoding rate limit exceeded. Please wait a few moments before trying again.'
+          `Geocoding API error (HTTP 429): Rate limit or quota exceeded for ${plugin.name}.`
         );
       }
-      if (!resp.ok) return null;
+      if (!resp.ok) {
+        const errText = await resp.text().catch(() => '');
+        const cleanErr = errText.startsWith('<')
+          ? resp.statusText || 'Upstream service error'
+          : errText.slice(0, 200) || resp.statusText || 'Request failed';
+        throw new Error(
+          `Geocoding API error (HTTP ${resp.status}): ${cleanErr}`
+        );
+      }
       const data = await resp.json();
 
       if (plugin.statusField && plugin.statusOkValue) {
-        const statusVal = getFieldByPath(data, [plugin.statusField]);
-        if (String(statusVal || '') !== plugin.statusOkValue) {
-          return null;
+        const statusVal = String(getFieldByPath(data, [plugin.statusField]) || '');
+        if (statusVal !== plugin.statusOkValue) {
+          if (statusVal === 'ZERO_RESULTS') {
+            return null;
+          }
+          const errMsg = String(
+            (data as Record<string, unknown>)['error_message'] || statusVal
+          );
+          throw new Error(
+            `Geocoding API error (${statusVal}): ${errMsg}`
+          );
         }
       }
 
@@ -211,7 +227,7 @@ export class LocationProviderService {
       metadataCache.put(cacheKey, res);
       return res;
     } catch (e) {
-      if (e instanceof Error && e.message.includes('rate limit')) {
+      if (e instanceof Error && e.message.startsWith('Geocoding API error')) {
         throw e;
       }
     }

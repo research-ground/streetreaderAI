@@ -133,7 +133,7 @@ export class ImageryProviderService implements ImageryProviderClient {
     const key = this.config.getKeyByName(plugin.requiresKey);
     if (!key) {
       throw new Error(
-        `Missing required key "${plugin.requiresKey}" for imagery provider "${plugin.name}". Set it in streetreaderai.conf or streetreaderai.local.conf.`
+        `Missing required key "${plugin.requiresKey}" for imagery provider "${plugin.name}". Set it in streetreaderai.conf.`
       );
     }
     return key;
@@ -304,8 +304,9 @@ export class ImageryProviderService implements ImageryProviderClient {
         return [];
       }
       if (!resp.ok) {
+        const errDetail = (errObj?.message || '').trim() || resp.statusText;
         throw new Error(
-          `${plugin.name} imagery service error (HTTP ${resp.status})`
+          `${plugin.name} imagery service error (HTTP ${resp.status}${errDetail ? `: ${errDetail}` : ''})`
         );
       }
 

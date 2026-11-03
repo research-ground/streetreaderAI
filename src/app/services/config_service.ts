@@ -72,12 +72,12 @@ export interface AiPluginConfig {
   endpointUrl: string;
 }
 
-export const DEFAULT_STARTING_ADDRESS = '601 N 34th St, Seattle, WA';
+export const DEFAULT_STARTING_ADDRESS = '2110 5th Ave, Seattle, WA';
 export const DEFAULT_PANORAMAX_BASE_URL = 'https://api.panoramax.xyz/api';
 export const DEFAULT_MAPILLARY_BASE_URL = 'https://graph.mapillary.com';
 export const DEFAULT_NOMINATIM_BASE_URL = 'https://nominatim.openstreetmap.org';
 export const DEFAULT_GOOGLE_MAPS_BASE_URL = 'https://maps.googleapis.com/maps/api';
-export const DEFAULT_GEMINI_MODEL_ID = 'gemini-3.8-flash';
+export const DEFAULT_GEMINI_MODEL_ID = 'gemini-3.5-flash-lite';
 export const DEFAULT_OPENAI_MODEL_ID = 'gpt-5.6-terra';
 
 export const SERVER_KEY_PREFIX = '__SERVER_KEY:';
@@ -99,12 +99,8 @@ export const DEFAULT_STREETREADER_CONF = `
 imagery_provider = panoramax
 location_provider = osm
 ai_provider = gemini
-starting_address = 601 N 34th St, Seattle, WA
+starting_address = 2110 5th Ave, Seattle, WA
 max_poi_items = 3
-
-[models]
-gemini_model = gemini-3.8-flash
-openai_model = gpt-5.6-terra
 
 [keys]
 gemini_api_key =
@@ -175,7 +171,7 @@ place_id_field = place_id
 [ai.gemini]
 requires_key = gemini_api_key
 wire_format = gemini
-model_id = gemini-3.8-flash
+model_id = gemini-3.5-flash-lite
 endpoint_url = https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={apiKey}
 
 [ai.openai]
@@ -381,8 +377,8 @@ export class ConfigService {
 
   /**
    * Loads server-redacted configuration from `/api/config` (where secret keys
-   * are replaced by server-side placeholders), falling back to `/streetreaderai.conf.example`
-   * and `/streetreaderai.conf` in offline/test environments.
+   * are replaced by server-side placeholders), falling back to `/streetreaderai.conf`
+   * in offline/test environments.
    */
   async loadConfig(): Promise<void> {
     let baseSections = parseConfIni(DEFAULT_STREETREADER_CONF);
@@ -394,17 +390,9 @@ export class ConfigService {
       return;
     }
 
-    const exampleText = await this.fetchConfFile('/streetreaderai.conf.example');
-    if (exampleText) {
-      baseSections = parseConfIni(exampleText, baseSections);
-    }
     const userText = await this.fetchConfFile('/streetreaderai.conf');
     if (userText) {
       baseSections = parseConfIni(userText, baseSections);
-    }
-    const modelsText = await this.fetchConfFile('/models.conf');
-    if (modelsText) {
-      baseSections = parseConfIni(modelsText, baseSections);
     }
     this.sections = baseSections;
     this.applyConfSections(this.sections);
@@ -686,7 +674,7 @@ export class ConfigService {
       return null;
     }
 
-    return `Missing required API key configuration: ${missing.join(', ')}. Please configure it in models.conf.`;
+    return `Missing required API key configuration: ${missing.join(', ')}. Please configure it in streetreaderai.conf.`;
   }
 
   private loadString(key: string, fallback: string): string {

@@ -42,7 +42,7 @@ describe('DemoModeModule', () => {
     stateService = TestBed.inject(StateService);
   });
 
-  it('maps number keys 1-4 and 5-8 and switches to generic questions on custom address search', () => {
+  it('maps number keys 1-4 and 5-7 and switches to generic questions on custom address search', () => {
     const loadCoordsSpy = vi.spyOn(navService, 'loadCoordinates').mockImplementation(() => {});
     const cmdSpy = vi.spyOn(commandService, 'execute');
 
@@ -53,7 +53,7 @@ describe('DemoModeModule', () => {
     expect(demoService.activeLocation()?.id).toBe('amsterdam-oudezijds-voorburgwal');
     expect(loadCoordsSpy).toHaveBeenCalledWith(52.37299, 4.89696, 38);
 
-    // When LLM suggestedQuestions are populated in StateService, activeQuestions uses them
+    // When LLM suggestedQuestions are populated in StateService, activeQuestions uses up to 3
     stateService.setMetadata({
       suggestedQuestions: [
         'What does the sign on the corner canal house say?',
@@ -62,6 +62,7 @@ describe('DemoModeModule', () => {
         'How wide is the brick sidewalk on this side?',
       ],
     });
+    expect(demoService.activeQuestions().length).toBe(3);
     expect(demoService.activeQuestions()[0].question).toBe(
       'What does the sign on the corner canal house say?'
     );
@@ -88,6 +89,6 @@ describe('DemoModeModule', () => {
 
     const chatFixture = TestBed.createComponent(ChatComponent);
     chatFixture.detectChanges();
-    expect(chatFixture.nativeElement.querySelectorAll('.demo-q-btn').length).toBe(4);
+    expect(chatFixture.nativeElement.querySelectorAll('.demo-q-btn').length).toBe(3);
   });
 });

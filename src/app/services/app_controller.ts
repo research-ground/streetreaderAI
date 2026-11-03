@@ -278,7 +278,7 @@ export class AppController {
         this.currentAskSubscription = null;
         console.error('Error executing action:', err);
         const msg =
-          err instanceof Error && err.message.includes('API Key is not configured')
+          err instanceof Error && err.message
             ? err.message
             : 'There was an error communicating with the AI service.';
         this.stateService.addChatMessage('assistant', msg);
