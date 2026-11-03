@@ -36,7 +36,7 @@ google_maps_api_key =
 retrieval_type = sequence
 image_format = 360
 bbox_url = https://api.panoramax.xyz/api/search?bbox={minLng},{minLat},{maxLng},{maxLat}&limit=500&filter=field_of_view=360
-sequence_url = https://api.panoramax.xyz/api/collections/{sequenceId}/items?limit=500
+sequence_url = https://api.panoramax.xyz/api/search?collections={sequenceId}&bbox={minLng},{minLat},{maxLng},{maxLat}&limit=500&filter=field_of_view=360
 metadata_url = https://api.panoramax.xyz/api/search?ids={imageId}&limit=1
 items_path = features
 id_field = id

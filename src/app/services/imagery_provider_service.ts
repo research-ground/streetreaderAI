@@ -46,10 +46,20 @@ export interface RenderedImageResult {
   actualHeading: number;
 }
 
+export interface SequenceBbox {
+  minLat: number;
+  minLng: number;
+  maxLat: number;
+  maxLng: number;
+}
+
 export interface ImageryProviderClient {
   readonly providerName: string;
   getMetadata(imageId: string): Promise<LocationMetadata | null>;
-  getSequence(sequenceId: string): Promise<LocationMetadata[]>;
+  getSequence(
+    sequenceId: string,
+    bbox?: SequenceBbox
+  ): Promise<LocationMetadata[]>;
   getMetadataBbox(
     minLat: number,
     minLng: number,
@@ -169,7 +179,10 @@ export class ImageryProviderService implements ImageryProviderClient {
     }
   }
 
-  async getSequence(sequenceId: string): Promise<LocationMetadata[]> {
+  async getSequence(
+    sequenceId: string,
+    bbox?: SequenceBbox
+  ): Promise<LocationMetadata[]> {
     const plugin = this.getActivePlugin();
     if (!sequenceId) return [];
     const seqStr = String(sequenceId);
@@ -178,14 +191,17 @@ export class ImageryProviderService implements ImageryProviderClient {
       return this.getPointSampledSequence(plugin, seqStr);
     }
 
-    const seqKey = `${plugin.name}:seq:${seqStr}`;
+    const bboxTag = bbox
+      ? `:${bbox.minLng.toFixed(4)},${bbox.minLat.toFixed(4)},${bbox.maxLng.toFixed(4)},${bbox.maxLat.toFixed(4)}`
+      : '';
+    const seqKey = `${plugin.name}:seq:${seqStr}${bboxTag}`;
     const cached = windowCache.get(seqKey) as LocationMetadata[] | undefined;
     if (cached) {
       queryAudit.recordCacheHit(`${plugin.name}_seq`);
       return cached;
     }
 
-    return singleflight(`${plugin.name}_seq:${this.panosOnly}:${seqStr}`, async () => {
+    return singleflight(`${plugin.name}_seq:${this.panosOnly}:${seqStr}${bboxTag}`, async () => {
       const again = windowCache.get(seqKey) as LocationMetadata[] | undefined;
       if (again) {
         queryAudit.recordCacheHit(`${plugin.name}_seq`);
@@ -194,9 +210,23 @@ export class ImageryProviderService implements ImageryProviderClient {
 
       if (!plugin.sequenceUrl) return [];
       const apiKey = this.ensurePluginKey(plugin);
-      const url = interpolateUrlTemplate(plugin.sequenceUrl, {
+      const rawTemplate = bbox
+        ? plugin.sequenceUrl
+        : plugin.sequenceUrl.replace(/([?&])bbox=\{[^}]+\}(?:,\{[^}]+\})*&?/g, (_m, sep) =>
+            sep === '?' ? '?' : ''
+          ).replace(/\?&/, '?').replace(/\?$/, '');
+      const url = interpolateUrlTemplate(rawTemplate, {
         sequenceId: seqStr,
         apiKey,
+        ...(bbox
+          ? {
+              minLat: bbox.minLat,
+              minLng: bbox.minLng,
+              maxLat: bbox.maxLat,
+              maxLng: bbox.maxLng,
+              bbox: `${bbox.minLng},${bbox.minLat},${bbox.maxLng},${bbox.maxLat}`,
+            }
+          : {}),
       });
 
       queryAudit.recordExternal(`${plugin.name}_seq`, seqStr);

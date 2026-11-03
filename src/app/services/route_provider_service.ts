@@ -732,6 +732,40 @@ export class AreaSnapshot {
     }
   }
 
+  private getSnapshotBbox():
+    | { minLat: number; minLng: number; maxLat: number; maxLng: number }
+    | undefined {
+    let minLat = Infinity;
+    let maxLat = -Infinity;
+    let minLng = Infinity;
+    let maxLng = -Infinity;
+
+    for (const w of this.roads.ways.values()) {
+      for (const [lat, lng] of w.pts) {
+        if (lat < minLat) minLat = lat;
+        if (lat > maxLat) maxLat = lat;
+        if (lng < minLng) minLng = lng;
+        if (lng > maxLng) maxLng = lng;
+      }
+    }
+    for (const c of this.clusters.values()) {
+      if (c.lat < minLat) minLat = c.lat;
+      if (c.lat > maxLat) maxLat = c.lat;
+      if (c.lng < minLng) minLng = c.lng;
+      if (c.lng > maxLng) maxLng = c.lng;
+    }
+    if (!Number.isFinite(minLat)) {
+      return undefined;
+    }
+    const pad = 0.001;
+    return {
+      minLat: Number((minLat - pad).toFixed(5)),
+      minLng: Number((minLng - pad).toFixed(5)),
+      maxLat: Number((maxLat + pad).toFixed(5)),
+      maxLng: Number((maxLng + pad).toFixed(5)),
+    };
+  }
+
   async expandSequence(
     seqId: string | null | undefined,
     cacheOnly: boolean = false
@@ -740,7 +774,11 @@ export class AreaSnapshot {
       return 0;
     }
     const seqStr = String(seqId);
-    const seqKey = `${this.providerName}:seq:${seqStr}`;
+    const bbox = this.getSnapshotBbox();
+    const bboxTag = bbox
+      ? `:${bbox.minLng.toFixed(4)},${bbox.minLat.toFixed(4)},${bbox.maxLng.toFixed(4)},${bbox.maxLat.toFixed(4)}`
+      : '';
+    const seqKey = `${this.providerName}:seq:${seqStr}${bboxTag}`;
     const cachedRaw = windowCache.get(seqKey) as LocationMetadata[] | undefined;
     let metas: LocationMetadata[] = [];
 
@@ -748,7 +786,7 @@ export class AreaSnapshot {
       queryAudit.recordCacheHit('sequence');
       metas = cachedRaw;
     } else if (!cacheOnly) {
-      metas = (await this.provider.getSequence(seqStr)) || [];
+      metas = (await this.provider.getSequence(seqStr, bbox)) || [];
       if (!windowCache.get(seqKey)) {
         windowCache.put(seqKey, metas);
       }
@@ -1598,6 +1636,7 @@ export class RouteProviderService {
     this.visitedImageIds.clear();
     this.brokenImageIds.clear();
     graphCache.clear();
+    windowCache.clear();
   }
 
   private nodeCacheKey(
@@ -1791,6 +1830,14 @@ export class RouteProviderService {
     let lng = params.coordinates?.longitude;
 
     if (canonicalNodeId && !canonicalNodeId.startsWith('osm_')) {
+      if (lat !== undefined && lng !== undefined) {
+        const snapForCache = await this.snapshotAt(lat, lng);
+        const wasSolved = snapForCache.solved;
+        await snapForCache.solve(lat, lng);
+        if (!wasSolved || !graphCache.get(this.nodeCacheKey(canonicalNodeId, imageId))) {
+          this.cacheSolvedGraph(snapForCache);
+        }
+      }
       const cachedNode =
         graphCache.get(this.nodeCacheKey(canonicalNodeId, imageId)) ??
         graphCache.get(this.nodeCacheKey(canonicalNodeId, null));
@@ -1906,7 +1953,7 @@ export class RouteProviderService {
       this.activeSequences.push(ref.sequenceId);
     }
 
-    if (snap && (!snap.solved || !snap.adj.has(place.nodeId))) {
+    if (snap) {
       await snap.solve(place.lat, place.lng);
     }
     const rawOutLinks = snap ? snap.adj.get(place.nodeId) || [] : [];
@@ -1989,6 +2036,7 @@ export class RouteProviderService {
   ): Promise<LocalGraphResponse> {
     const snap = await this.snapshotAt(lat, lng);
     await snap.solve(lat, lng, radiusM);
+    this.cacheSolvedGraph(snap);
 
     const degLat = radiusM / 111320.0;
     const degLng =

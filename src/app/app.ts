@@ -42,7 +42,7 @@ import { ErrorDialogComponent } from './components/error_dialog/error_dialog';
 import { PaletteComponent } from './components/palette/palette';
 import { RadarViewComponent } from './components/radar_view/radar_view';
 import { AppController } from "./services/app_controller";
-import { DemoModeService } from './demo_mode';
+import { DEMO_LOCATIONS, DemoModeService } from './demo_mode';
 
 import { Subscription } from 'rxjs';
 
@@ -148,13 +148,26 @@ export class App implements OnInit, OnDestroy {
       this.openActivationDialog();
     }
 
+    const loadStartingLocation = (addr: string) => {
+      const preset = DEMO_LOCATIONS[0];
+      if (!addr || addr.trim() === preset.address) {
+        this.navigationService.loadCoordinates(
+          preset.latitude,
+          preset.longitude,
+          preset.heading,
+        );
+      } else {
+        this.navigationService.loadLocationWithHeading(addr, 0);
+      }
+    };
+
     this.apiService.getConfig().subscribe({
       next: (cfg) => {
         this.startingAddress = cfg.startingAddress || '601 N 34th St, Seattle, WA';
-        this.navigationService.loadLocationWithHeading(this.startingAddress, 107);
+        loadStartingLocation(this.startingAddress);
       },
       error: () => {
-        this.navigationService.loadLocationWithHeading(this.startingAddress, 107);
+        loadStartingLocation(this.startingAddress);
       }
     });
   }
