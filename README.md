@@ -63,7 +63,7 @@ All provider selections, model versions, and API keys are controlled in [`street
   2. Add the corresponding API key (`openai_api_key = sk-...` or `gemini_api_key = AIza...`) under `[keys]`.
   3. *(Optional)* Customize `model_id` under `[ai.gemini]` (default `gemini-3.5-flash-lite`) or `[ai.openai]` (default `gpt-5.6-terra`).
 * **Switch Street Imagery or Location Provider**:
-  * Set `imagery_provider = panoramax | mapillary | google` and `location_provider = osm | google` under `[system]`, and supply `mapillary_token` or `google_maps_api_key` under `[keys]` if required.
+  * Set `imagery_provider = panoramax | mapillary` and `location_provider = osm | google` under `[system]`, and supply `mapillary_token` or `google_maps_api_key` under `[keys]` if required.
 * **Apply Changes**: Save `streetreaderai.conf` and refresh the browser page (`src/server.ts` re-reads `streetreaderai.conf` on every page load—no server restart required). See **[Configuring Data & AI Providers](docs/configuration.md)** for full details on switching or adding custom providers.
 
 Start the development server:
