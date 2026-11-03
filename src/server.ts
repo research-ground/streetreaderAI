@@ -195,7 +195,9 @@ function replaceServerKeyPlaceholders(
 }
 
 const app = express();
-const angularApp = new AngularNodeAppEngine();
+const angularApp = new AngularNodeAppEngine({
+  allowedHosts: ['*'],
+});
 
 app.use('/api', express.json({ limit: '2048mb' }));
 

@@ -23,6 +23,9 @@
             "ssr": {
               "entry": "src/server.ts"
             },
+            "security": {
+              "allowedHosts": ["*"]
+            },
             "tsConfig": "tsconfig.app.json",
             "assets": [
               {
@@ -69,6 +72,9 @@
         },
         "serve": {
           "builder": "@angular/build:dev-server",
+          "options": {
+            "allowedHosts": true
+          },
           "configurations": {
             "production": {
               "buildTarget": "StreetReaderAI:build:production"
