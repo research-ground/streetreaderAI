@@ -55,7 +55,7 @@ export class PanoramaCropService {
       return existing;
     }
 
-    const rawBase64 = await this.blobToBase64(blob);
+    const rawBase64 = await blobToBase64(blob);
     if (!isPano || typeof document === 'undefined') {
       const entry: DecodedPanorama = {
         width: 0,
@@ -228,19 +228,6 @@ export class PanoramaCropService {
     return commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : dataUrl;
   }
 
-  private blobToBase64(blob: Blob): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const res = String(reader.result || '');
-        const comma = res.indexOf(',');
-        resolve(comma >= 0 ? res.slice(comma + 1) : res);
-      };
-      reader.onerror = () => reject(reader.error);
-      reader.readAsDataURL(blob);
-    });
-  }
-
   private loadImageFromBlob(blob: Blob): Promise<HTMLImageElement> {
     return new Promise((resolve, reject) => {
       const url = URL.createObjectURL(blob);
@@ -256,4 +243,27 @@ export class PanoramaCropService {
       img.src = url;
     });
   }
+}
+
+export async function blobToBase64(blob: Blob): Promise<string> {
+  if (typeof blob.arrayBuffer === 'function') {
+    const buf = await blob.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    const chunkSize = 0x8000;
+    const chunks: string[] = [];
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      chunks.push(String.fromCharCode(...bytes.subarray(i, i + chunkSize)));
+    }
+    return btoa(chunks.join(''));
+  }
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const res = String(reader.result || '');
+      const comma = res.indexOf(',');
+      resolve(comma >= 0 ? res.slice(comma + 1) : res);
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
 }

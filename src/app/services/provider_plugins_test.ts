@@ -21,6 +21,7 @@ import { clearAllClientCaches } from './client_cache';
 import { ConfigService } from './config_service';
 import { ImageryProviderService } from './imagery_provider_service';
 import { LocationProviderService } from './location_provider_service';
+import { blobToBase64 } from './panorama_crop_service';
 
 describe('Declarative Provider Plugins (.conf)', () => {
   beforeEach(() => {
@@ -397,5 +398,21 @@ openai_api_key = TestOpenAiKey
     expect(errHtml).toContain('HTTP 503');
     expect(errHtml).toContain('Service Unavailable');
     expect(errHtml).not.toContain('<!DOCTYPE');
+  });
+
+  it('blobToBase64 handles both cross-realm native Blobs (via arrayBuffer) and JSDOM Blobs (via FileReader)', async () => {
+    // 1. Cross-realm Blob-like object (reproduces JSDOM FileReader "parameter 1 is not of type 'Blob'" if FileReader is called)
+    const crossRealmBlob = {
+      size: 4,
+      type: 'image/jpeg',
+      arrayBuffer: async () => new Uint8Array([0xff, 0xd8, 0xff, 0xd9]).buffer,
+    } as unknown as Blob;
+    expect(await blobToBase64(crossRealmBlob)).toBe('/9j/2Q==');
+
+    // 2. JSDOM Blob (falls back to FileReader if arrayBuffer() is absent)
+    const jsdomBlob = new Blob([new Uint8Array([0xff, 0xd8, 0xff, 0xd9])], {
+      type: 'image/jpeg',
+    });
+    expect(await blobToBase64(jsdomBlob)).toBe('/9j/2Q==');
   });
 });

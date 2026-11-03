@@ -24,7 +24,7 @@ import {
   interpolateUrlTemplate,
 } from './config_service';
 import { calculateDistance, M_PER_DEG_LAT } from './location_provider_service';
-import { PanoramaCropService } from './panorama_crop_service';
+import { blobToBase64, PanoramaCropService } from './panorama_crop_service';
 
 export interface LocationMetadata {
   imageId: string;
@@ -739,7 +739,7 @@ export class ImageryProviderService implements ImageryProviderClient {
       if (!resp.ok) return null;
       const blob = await resp.blob();
       if (!blob || blob.size === 0) return null;
-      const base64 = await this.blobToBase64(blob);
+      const base64 = await blobToBase64(blob);
       return {
         image: base64,
         imageId: originalImageId,
@@ -748,19 +748,6 @@ export class ImageryProviderService implements ImageryProviderClient {
     } catch {
       return null;
     }
-  }
-
-  private blobToBase64(blob: Blob): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const res = String(reader.result || '');
-        const comma = res.indexOf(',');
-        resolve(comma >= 0 ? res.slice(comma + 1) : res);
-      };
-      reader.onerror = () => reject(reader.error);
-      reader.readAsDataURL(blob);
-    });
   }
 
   // =====================================================================
