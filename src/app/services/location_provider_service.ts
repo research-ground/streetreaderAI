@@ -158,7 +158,7 @@ export class LocationProviderService {
 
     try {
       queryAudit.recordExternal(`${plugin.name}_fwd`, norm);
-      const resp = await fetch(url, {
+      const resp = await this.config.proxiedFetch(url, {
         headers: { Accept: 'application/json' },
       });
       if (resp.status === 429) {
@@ -243,7 +243,7 @@ export class LocationProviderService {
         `${plugin.name}_rev`,
         `${lat.toFixed(5)},${lng.toFixed(5)}`
       );
-      const resp = await fetch(url, {
+      const resp = await this.config.proxiedFetch(url, {
         headers: { Accept: 'application/json' },
       });
       if (!resp.ok) return null;
@@ -305,7 +305,7 @@ export class LocationProviderService {
         if (sessionToken) {
           body['sessionToken'] = sessionToken;
         }
-        const resp = await fetch(plugin.autocompleteUrl, {
+        const resp = await this.config.proxiedFetch(plugin.autocompleteUrl, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -359,7 +359,7 @@ export class LocationProviderService {
     });
     try {
       queryAudit.recordExternal(`${plugin.name}_auto`, norm);
-      const resp = await fetch(url, {
+      const resp = await this.config.proxiedFetch(url, {
         headers: { Accept: 'application/json' },
       });
       if (!resp.ok) return [];
@@ -553,7 +553,7 @@ export class LocationProviderService {
       `${lat.toFixed(4)},${lng.toFixed(4)}:${radius}`
     );
     try {
-      const resp = await fetch(plugin.nearbyUrl!, {
+      const resp = await this.config.proxiedFetch(plugin.nearbyUrl!, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

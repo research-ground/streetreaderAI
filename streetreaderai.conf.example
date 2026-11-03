@@ -1,9 +1,9 @@
 # ============================================================================
-# StreetReaderAI System Configuration (streetreaderai.conf)
+# StreetReaderAI System & Plugin Configuration (streetreaderai.conf)
 # ============================================================================
-# Copy this file to `streetreaderai.conf` (which is git-ignored) and set your
-# API keys and active providers below.
-# In Google AI Studio, GEMINI_API_KEY is injected automatically by the host.
+# Configure API keys, active providers, and model versions in `models.conf`.
+# Use `streetreaderai.conf` for system defaults (such as `starting_address`)
+# and declarative URL/field mappings for imagery, location, and AI plugins.
 
 [system]
 imagery_provider = panoramax
@@ -11,6 +11,10 @@ location_provider = osm
 ai_provider = gemini
 starting_address = 601 N 34th St, Seattle, WA
 max_poi_items = 3
+
+[models]
+gemini_model = gemini-3.8-flash
+openai_model = gpt-5.6-terra
 
 [keys]
 gemini_api_key =

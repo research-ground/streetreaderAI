@@ -48,20 +48,34 @@ describe('DemoModeModule', () => {
 
     expect(demoService.enabled()).toBe(true);
 
-    // Press '3' to jump to 3rd preset location (Amsterdam — Damrak)
+    // Press '3' to jump to 3rd preset location (Amsterdam — Oudezijds Voorburgwal)
     window.dispatchEvent(new KeyboardEvent('keydown', { key: '3' }));
-    expect(demoService.activeLocation()?.id).toBe('amsterdam-damrak');
-    expect(loadCoordsSpy).toHaveBeenCalledWith(52.3740, 4.8925, 205);
+    expect(demoService.activeLocation()?.id).toBe('amsterdam-oudezijds-voorburgwal');
+    expect(loadCoordsSpy).toHaveBeenCalledWith(52.37299, 4.89696, 38);
 
-    // Press '5' to ask first question for Amsterdam
+    // When LLM suggestedQuestions are populated in StateService, activeQuestions uses them
+    stateService.setMetadata({
+      suggestedQuestions: [
+        'What does the sign on the corner canal house say?',
+        'Is there a railing along the canal edge ahead?',
+        'Are there bicycles parked on the bridge to the right?',
+        'How wide is the brick sidewalk on this side?',
+      ],
+    });
+    expect(demoService.activeQuestions()[0].question).toBe(
+      'What does the sign on the corner canal house say?'
+    );
+
+    // Press '5' to ask first LLM-suggested question
     window.dispatchEvent(new KeyboardEvent('keydown', { key: '5' }));
     expect(cmdSpy).toHaveBeenCalledWith({
       type: 'EXECUTE_AI_ACTION',
-      payload: demoService.activeQuestions()[0].question,
+      payload: 'What does the sign on the corner canal house say?',
     });
     expect(stateService.state().chatHistory.length).toBeGreaterThan(0);
 
-    // Searching a custom address switches to generic questions
+    // Searching a custom address clears preset selection and falls back to generic questions when LLM questions are reset
+    stateService.setMetadata({ suggestedQuestions: [] });
     commandService.execute({ type: 'SEARCH_ADDRESS', payload: '123 Custom St, Chicago, IL' });
     expect(demoService.activeLocation()).toBeNull();
     expect(demoService.activeQuestions()[0].label).toBe('Storefronts & signs');

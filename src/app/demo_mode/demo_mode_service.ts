@@ -41,9 +41,17 @@ export class DemoModeService {
     return idx >= 0 && idx < this.locations.length ? this.locations[idx] : null;
   });
 
-  readonly activeQuestions = computed<DemoQuestion[]>(
-    () => this.activeLocation()?.questions ?? GENERIC_QUESTIONS
-  );
+  readonly activeQuestions = computed<DemoQuestion[]>(() => {
+    const llmQuestions = this.stateService.state().suggestedQuestions;
+    if (llmQuestions && llmQuestions.length > 0) {
+      return llmQuestions.slice(0, 4).map((q, idx) => ({
+        key: String(5 + idx),
+        label: q,
+        question: q,
+      }));
+    }
+    return this.activeLocation()?.questions ?? GENERIC_QUESTIONS;
+  });
 
   private readonly boundKeyHandler = (event: KeyboardEvent) => this.onKeyDown(event);
 

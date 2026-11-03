@@ -17,6 +17,11 @@
 import { Injectable } from '@angular/core';
 import { safeStorage } from './safe_storage';
 
+export interface CachedDescriptionEntry {
+  description: string;
+  suggestedQuestions?: string[];
+}
+
 @Injectable({
   providedIn: 'root'
 })
@@ -32,12 +37,44 @@ export class DescriptionCacheService {
     return `${this.PREFIX}${lat.toFixed(4)}:${lng.toFixed(4)}:${snappedHeading}`;
   }
 
-  get(lat: number, lng: number, heading: number, imageId?: string | null): string | null {
-    return safeStorage.getItem(this.getKey(lat, lng, heading, imageId));
+  getEntry(lat: number, lng: number, heading: number, imageId?: string | null): CachedDescriptionEntry | null {
+    const raw = safeStorage.getItem(this.getKey(lat, lng, heading, imageId));
+    if (!raw) return null;
+    if (raw.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed.description === 'string') {
+          return {
+            description: parsed.description,
+            suggestedQuestions: Array.isArray(parsed.suggestedQuestions)
+              ? parsed.suggestedQuestions
+              : undefined,
+          };
+        }
+      } catch {
+        // Fall through to legacy plain-string handling
+      }
+    }
+    return { description: raw };
   }
 
-  set(lat: number, lng: number, heading: number, description: string, imageId?: string | null): void {
-    safeStorage.setItem(this.getKey(lat, lng, heading, imageId), description);
+  get(lat: number, lng: number, heading: number, imageId?: string | null): string | null {
+    return this.getEntry(lat, lng, heading, imageId)?.description ?? null;
+  }
+
+  set(
+    lat: number,
+    lng: number,
+    heading: number,
+    description: string,
+    imageId?: string | null,
+    suggestedQuestions?: string[]
+  ): void {
+    const payload =
+      suggestedQuestions && suggestedQuestions.length > 0
+        ? JSON.stringify({ description, suggestedQuestions })
+        : description;
+    safeStorage.setItem(this.getKey(lat, lng, heading, imageId), payload);
   }
 
   clear(): void {

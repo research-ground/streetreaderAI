@@ -41,6 +41,7 @@ export interface AppState {
   // Metadata for current location
   address: string | null;
   description: string | null;
+  suggestedQuestions: string[];
   currentImage: string | null;
   adjacentNodes: Link[];
   nearbyPOIs: NearbyPlace[];
@@ -75,6 +76,7 @@ export class StateService {
     heading: 0,
     address: null,
     description: null,
+    suggestedQuestions: [],
     currentImage: null,
     adjacentNodes: [],
     nearbyPOIs: [],
@@ -181,7 +183,7 @@ export class StateService {
     this.appState.update(s => ({ ...s, heading: newHeading }));
   }
 
-  setMetadata(data: Partial<Pick<AppState, 'address' | 'description' | 'adjacentNodes' | 'nearbyPOIs'>>) {
+  setMetadata(data: Partial<Pick<AppState, 'address' | 'description' | 'suggestedQuestions' | 'adjacentNodes' | 'nearbyPOIs'>>) {
     this.appState.update(s => ({ ...s, ...data }));
   }
 

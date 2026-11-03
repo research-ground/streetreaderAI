@@ -102,6 +102,7 @@ export interface GetNearbyPlacesResponse {
 export interface DescribeImageResponse {
   success?: boolean;
   description: string;
+  suggestedQuestions?: string[];
 }
 
 export interface AskQuestionResponse {

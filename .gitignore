@@ -27,5 +27,7 @@ CLAUDE.md
 
 # Local archives & configuration (contains API keys)
 *.zip
+models.conf
+models.*.conf
 streetreaderai.conf
 streetreaderai.*.conf

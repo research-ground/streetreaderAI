@@ -92,6 +92,71 @@ thumb_url_field = links.pano_hd
     expect(seqItems[0].imageId).toBe('img_101');
   });
 
+  it('ImageryProviderService falls back across candidate URLs in thumb_url_field when the primary URL fails', async () => {
+    const config = TestBed.inject(ConfigService);
+    config.applyConfText(`
+[system]
+imagery_provider = panoramax
+    `);
+
+    const attemptedUrls: string[] = [];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes('api.panoramax.xyz/api/search?ids=')) {
+        return new Response(
+          JSON.stringify({
+            features: [
+              {
+                id: 'pano_fallback_1',
+                geometry: { coordinates: [-122.3497, 47.6492] },
+                collection: 'seq_1',
+                properties: {
+                  'view:azimuth': 90,
+                  datetime: '2026-01-01T00:00:00Z',
+                },
+                assets: {
+                  sd: { href: 'https://pano.locus.sbs/api/pictures/pano_fallback_1/sd.jpg' },
+                  hd: { href: 'https://pano.locus.sbs/api/pictures/pano_fallback_1/hd.jpg' },
+                  thumb: { href: 'https://pano.locus.sbs/api/pictures/pano_fallback_1/thumb.jpg' },
+                },
+              },
+            ],
+          }),
+          { status: 200 }
+        );
+      }
+      if (url.endsWith('/sd.jpg')) {
+        attemptedUrls.push(url);
+        throw new TypeError('Failed to fetch');
+      }
+      if (url.endsWith('/hd.jpg')) {
+        attemptedUrls.push(url);
+        return new Response(new Uint8Array([0xff, 0xd8, 0xff, 0xd9]), {
+          status: 200,
+          headers: { 'Content-Type': 'image/jpeg' },
+        });
+      }
+      return new Response('{}', { status: 404 });
+    });
+
+    const imagery = TestBed.inject(ImageryProviderService);
+    const meta = await imagery.getMetadata('pano_fallback_1');
+    expect(meta?.thumbUrl).toBe('https://pano.locus.sbs/api/pictures/pano_fallback_1/sd.jpg');
+    expect(meta?.thumbUrls).toEqual([
+      'https://pano.locus.sbs/api/pictures/pano_fallback_1/sd.jpg',
+      'https://pano.locus.sbs/api/pictures/pano_fallback_1/hd.jpg',
+      'https://pano.locus.sbs/api/pictures/pano_fallback_1/thumb.jpg',
+    ]);
+
+    const rendered = await imagery.getImage('pano_fallback_1', 90);
+    expect(attemptedUrls).toEqual([
+      'https://pano.locus.sbs/api/pictures/pano_fallback_1/sd.jpg',
+      'https://pano.locus.sbs/api/pictures/pano_fallback_1/hd.jpg',
+    ]);
+    expect(rendered).toBeTruthy();
+    expect(rendered?.imageId).toBe('pano_fallback_1');
+  });
+
   it('ImageryProviderService executes retrieval_type=image + image_format=single plugins for point lookup and directional viewports', async () => {
     const config = TestBed.inject(ConfigService);
     config.applyConfText(`

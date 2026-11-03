@@ -34,6 +34,7 @@ export interface LocationMetadata {
   isPano: boolean;
   sequenceId?: string | null;
   thumbUrl?: string | null;
+  thumbUrls?: string[];
   prevImageId?: string | null;
   nextImageId?: string | null;
   provider?: string;
@@ -155,7 +156,7 @@ export class ImageryProviderService implements ImageryProviderClient {
         apiKey,
       });
       queryAudit.recordExternal(`${plugin.name}_meta`, rawId);
-      const resp = await fetch(url);
+      const resp = await this.config.proxiedFetch(url);
       if (!resp.ok) return null;
       const payload = await resp.json();
       const items = this.extractItems(payload, plugin.itemsPath);
@@ -200,7 +201,7 @@ export class ImageryProviderService implements ImageryProviderClient {
 
       queryAudit.recordExternal(`${plugin.name}_seq`, seqStr);
       try {
-        const resp = await fetch(url);
+        const resp = await this.config.proxiedFetch(url);
         if (!resp.ok) return [];
         const payload = await resp.json();
         const items = this.extractItems(payload, plugin.itemsPath);
@@ -256,7 +257,7 @@ export class ImageryProviderService implements ImageryProviderClient {
         `${plugin.name}_bbox`,
         `${minLat.toFixed(5)},${minLng.toFixed(5)},${maxLat.toFixed(5)},${maxLng.toFixed(5)}`
       );
-      const resp = await fetch(url);
+      const resp = await this.config.proxiedFetch(url);
       let payload: Record<string, unknown> = {};
       try {
         payload = (await resp.json()) || {};
@@ -286,7 +287,7 @@ export class ImageryProviderService implements ImageryProviderClient {
       ) {
         try {
           const fbUrl = url.replace(/[?&]filter=field_of_view[^&]*/, '');
-          const fbResp = await fetch(fbUrl);
+          const fbResp = await this.config.proxiedFetch(fbUrl);
           if (fbResp.ok) {
             const fbPayload = await fbResp.json();
             items = this.extractItems(fbPayload, plugin.itemsPath);
@@ -335,13 +336,30 @@ export class ImageryProviderService implements ImageryProviderClient {
         queryAudit.recordCacheHit(`${plugin.name}_image`);
       } else {
         const meta = await this.getMetadata(rawId);
-        if (!meta?.thumbUrl) return null;
+        const candidateUrls =
+          meta?.thumbUrls && meta.thumbUrls.length > 0
+            ? meta.thumbUrls
+            : meta?.thumbUrl
+              ? [meta.thumbUrl]
+              : [];
+        if (!meta || candidateUrls.length === 0) return null;
 
-        queryAudit.recordExternal(`${plugin.name}_image`, rawId);
-        const imgResp = await fetch(meta.thumbUrl);
-        if (!imgResp.ok) return null;
-        const blob = await imgResp.blob();
-        if (!blob || blob.size === 0) return null;
+        let blob: Blob | null = null;
+        for (const candidateUrl of candidateUrls) {
+          try {
+            queryAudit.recordExternal(`${plugin.name}_image`, rawId);
+            const imgResp = await this.config.proxiedFetch(candidateUrl);
+            if (!imgResp.ok) continue;
+            const candidateBlob = await imgResp.blob();
+            if (candidateBlob && candidateBlob.size > 0) {
+              blob = candidateBlob;
+              break;
+            }
+          } catch {
+            // Try the next fallback URL in thumb_url_field
+          }
+        }
+        if (!blob) return null;
         decoded = await this.cropService.decodeAndCache(
           cacheKey,
           blob,
@@ -400,7 +418,7 @@ export class ImageryProviderService implements ImageryProviderClient {
           `${plugin.name}_point_meta`,
           `${lat.toFixed(5)},${lng.toFixed(5)}`
         );
-        const resp = await fetch(url);
+        const resp = await this.config.proxiedFetch(url);
         if (!resp.ok) return null;
         const payload = await resp.json();
         const items = this.extractItems(payload, plugin.itemsPath);
@@ -686,7 +704,7 @@ export class ImageryProviderService implements ImageryProviderClient {
         apiKey,
       });
       queryAudit.recordExternal(`${plugin.name}_image`, rawId);
-      const resp = await fetch(url);
+      const resp = await this.config.proxiedFetch(url);
       if (!resp.ok) return null;
       const blob = await resp.blob();
       if (!blob || blob.size === 0) return null;
@@ -791,8 +809,17 @@ export class ImageryProviderService implements ImageryProviderClient {
       }
     }
 
-    const rawThumb = getFieldByPath(item, plugin.thumbUrlField);
-    const thumbUrl = rawThumb ? String(rawThumb) : null;
+    const thumbUrls: string[] = [];
+    for (const fieldPath of plugin.thumbUrlField) {
+      const val = getFieldByPath(item, [fieldPath]);
+      if (val !== undefined && val !== null && String(val).trim().length > 0) {
+        const trimmed = String(val).trim();
+        if (!thumbUrls.includes(trimmed)) {
+          thumbUrls.push(trimmed);
+        }
+      }
+    }
+    const thumbUrl = thumbUrls[0] ?? null;
 
     let prevId: string | null = null;
     let nextId: string | null = null;
@@ -814,6 +841,7 @@ export class ImageryProviderService implements ImageryProviderClient {
       isPano,
       sequenceId: seqId,
       thumbUrl,
+      ...(thumbUrls.length > 0 ? { thumbUrls } : {}),
       prevImageId: prevId,
       nextImageId: nextId,
       provider: plugin.name,

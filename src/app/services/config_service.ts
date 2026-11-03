@@ -80,6 +80,20 @@ export const DEFAULT_GOOGLE_MAPS_BASE_URL = 'https://maps.googleapis.com/maps/ap
 export const DEFAULT_GEMINI_MODEL_ID = 'gemini-3.8-flash';
 export const DEFAULT_OPENAI_MODEL_ID = 'gpt-5.6-terra';
 
+export const SERVER_KEY_PREFIX = '__SERVER_KEY:';
+export const SERVER_ENV_KEY_PREFIX = '__SERVER_KEY_ENV:';
+
+export function isServerKeyPlaceholder(value: string): boolean {
+  return (
+    value.includes(SERVER_KEY_PREFIX) ||
+    value.includes(SERVER_ENV_KEY_PREFIX) ||
+    value.includes('__SERVER_KEY%3A') ||
+    value.includes('__SERVER_KEY%3a') ||
+    value.includes('__SERVER_KEY_ENV%3A') ||
+    value.includes('__SERVER_KEY_ENV%3a')
+  );
+}
+
 export const DEFAULT_STREETREADER_CONF = `
 [system]
 imagery_provider = panoramax
@@ -87,6 +101,10 @@ location_provider = osm
 ai_provider = gemini
 starting_address = 601 N 34th St, Seattle, WA
 max_poi_items = 3
+
+[models]
+gemini_model = gemini-3.8-flash
+openai_model = gpt-5.6-terra
 
 [keys]
 gemini_api_key =
@@ -306,6 +324,8 @@ export class ConfigService {
   private readonly _envMapillaryToken = signal<string>(
     readInjectedEnv('MAPILLARY_TOKEN')
   );
+  private readonly _serverEnvGeminiLocked = signal<boolean>(false);
+  private readonly _serverEnvGoogleMapsLocked = signal<boolean>(false);
 
   private readonly _mapillaryToken = signal<string>('');
   private readonly _imageryProvider = signal<ImageryProviderType>('panoramax');
@@ -320,11 +340,14 @@ export class ConfigService {
   private readonly _maxPoiItems = signal<number>(3);
 
   /** True when Gemini is provided by the host environment (e.g., Google AI Studio). */
-  readonly isGeminiLocked = computed(() => this._envGeminiKey().length > 0);
+  readonly isGeminiLocked = computed(
+    () => this._envGeminiKey().length > 0 || this._serverEnvGeminiLocked()
+  );
 
   /** True when Google Maps is provided by the host environment. */
   readonly isGoogleMapsLocked = computed(
-    () => this._envGoogleMapsKey().length > 0
+    () =>
+      this._envGoogleMapsKey().length > 0 || this._serverEnvGoogleMapsLocked()
   );
 
   readonly imageryProvider = this._imageryProvider.asReadonly();
@@ -362,11 +385,20 @@ export class ConfigService {
   }
 
   /**
-   * Loads `/streetreaderai.conf.example` as the default layer and merges
-   * `/streetreaderai.conf` on top if present.
+   * Loads server-redacted configuration from `/api/config` (where secret keys
+   * are replaced by server-side placeholders), falling back to `/streetreaderai.conf.example`
+   * and `/streetreaderai.conf` in offline/test environments.
    */
   async loadConfig(): Promise<void> {
     let baseSections = parseConfIni(DEFAULT_STREETREADER_CONF);
+    const serverConfText = await this.fetchConfFile('/api/config');
+    if (serverConfText) {
+      baseSections = parseConfIni(serverConfText, baseSections);
+      this.sections = baseSections;
+      this.applyConfSections(this.sections);
+      return;
+    }
+
     const exampleText = await this.fetchConfFile('/streetreaderai.conf.example');
     if (exampleText) {
       baseSections = parseConfIni(exampleText, baseSections);
@@ -375,8 +407,56 @@ export class ConfigService {
     if (userText) {
       baseSections = parseConfIni(userText, baseSections);
     }
+    const modelsText = await this.fetchConfFile('/models.conf');
+    if (modelsText) {
+      baseSections = parseConfIni(modelsText, baseSections);
+    }
     this.sections = baseSections;
     this.applyConfSections(this.sections);
+  }
+
+  /**
+   * Executes a `fetch` request, automatically routing through the server-side
+   * `/api/proxy` shim whenever the URL or headers contain a server-side key
+   * placeholder (`__SERVER_KEY:...__`).
+   */
+  async proxiedFetch(url: string, init?: RequestInit): Promise<Response> {
+    const rawHeaders: Record<string, string> = {};
+    let headersHaveServerKey = false;
+    if (init?.headers) {
+      if (init.headers instanceof Headers) {
+        init.headers.forEach((v, k) => {
+          rawHeaders[k] = v;
+          if (isServerKeyPlaceholder(v)) headersHaveServerKey = true;
+        });
+      } else if (Array.isArray(init.headers)) {
+        for (const [k, v] of init.headers) {
+          rawHeaders[k] = v;
+          if (isServerKeyPlaceholder(v)) headersHaveServerKey = true;
+        }
+      } else {
+        for (const [k, v] of Object.entries(init.headers)) {
+          rawHeaders[k] = String(v);
+          if (isServerKeyPlaceholder(String(v))) headersHaveServerKey = true;
+        }
+      }
+    }
+
+    if (!isServerKeyPlaceholder(url) && !headersHaveServerKey) {
+      return fetch(url, init);
+    }
+
+    return fetch('/api/proxy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        url,
+        method: init?.method || 'GET',
+        headers: rawHeaders,
+        body: typeof init?.body === 'string' ? init.body : undefined,
+      }),
+      signal: init?.signal,
+    });
   }
 
   /**
@@ -409,7 +489,11 @@ export class ConfigService {
   }
 
   private applyConfSections(sections: ParsedConfSections): void {
-    const sys = sections['system'] || {};
+    const sys = {
+      ...(sections['system'] || {}),
+      ...(sections['providers'] || {}),
+    };
+    const models = sections['models'] || {};
     const keys = sections['keys'] || {};
 
     if (sys['imagery_provider']) {
@@ -440,6 +524,8 @@ export class ConfigService {
     this._openaiApiKey.set('');
     this._mapillaryToken.set('');
     this._googleMapsApiKey.set('');
+    this._serverEnvGeminiLocked.set(false);
+    this._serverEnvGoogleMapsLocked.set(false);
 
     for (const [k, v] of Object.entries(keys)) {
       const trimmed = (v || '').trim();
@@ -447,12 +533,18 @@ export class ConfigService {
       this.customKeys.set(k, trimmed);
       if (k === 'gemini_api_key') {
         this._geminiApiKey.set(trimmed);
+        if (trimmed.startsWith(SERVER_ENV_KEY_PREFIX)) {
+          this._serverEnvGeminiLocked.set(true);
+        }
       } else if (k === 'openai_api_key') {
         this._openaiApiKey.set(trimmed);
       } else if (k === 'mapillary_token' || k === 'mapillary_access_token') {
         this._mapillaryToken.set(trimmed);
       } else if (k === 'google_maps_api_key') {
         this._googleMapsApiKey.set(trimmed);
+        if (trimmed.startsWith(SERVER_ENV_KEY_PREFIX)) {
+          this._serverEnvGoogleMapsLocked.set(true);
+        }
       }
     }
 
@@ -513,11 +605,13 @@ export class ConfigService {
         });
       } else if (secName.startsWith('ai.')) {
         const name = secName.slice('ai.'.length);
+        const modelOverride = models[`${name}_model`]?.trim();
         this.aiPlugins.set(name, {
           name,
           requiresKey: sec['requires_key'] || undefined,
           wireFormat: sec['wire_format'] === 'openai' ? 'openai' : 'gemini',
           modelId:
+            modelOverride ||
             sec['model_id'] ||
             (sec['wire_format'] === 'openai'
               ? DEFAULT_OPENAI_MODEL_ID
@@ -596,7 +690,7 @@ export class ConfigService {
       return null;
     }
 
-    return `Missing required API key configuration: ${missing.join(', ')}. Please configure it in streetreaderai.conf.`;
+    return `Missing required API key configuration: ${missing.join(', ')}. Please configure it in models.conf.`;
   }
 
   private loadString(key: string, fallback: string): string {

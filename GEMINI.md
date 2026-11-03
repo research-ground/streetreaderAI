@@ -7,18 +7,19 @@ Welcome! As an AI development assistant (Gemini, Antigravity, Jetski, etc.) work
 ## 1. Git & Branching Rules
 
 ### 🌿 Branch Workflow
-1. **Primary Branch**: `main` is the primary development branch for the pure client-side Angular SPA.
+1. **Primary Branch**: `main` is the primary development branch for the Angular SPA + Node/Express server shim (`src/server.ts`).
 
 ---
 
 ## 2. Environment & Runtime Expectations
 
 ### 🖥️ Development Server
-* StreetReaderAI runs as a 100% client-side Angular SPA at the repository root on port 4200 (`make start` / `npm start`).
+* StreetReaderAI runs as a client-rendered Angular SPA paired with a lightweight Express server-side key & proxy shim (`src/server.ts`) at the repository root on port 4200 (`make start` / `npm start`).
 * If the dev server is not running when executing browser tools or interactive checks, spin it up in the background (`make start`) rather than asking the developer to manually launch it.
 
 ### 🔑 API & Security Guidelines
-* **External Service Keys**: External service selections (`panoramax`, `mapillary`, `osm`, `google`, `gemini`, `openai`) and API keys are configured in `streetreaderai.conf` (git-ignored, templated from `streetreaderai.conf.example`).
+* **External Service Keys**: Active provider selections (`panoramax`, `mapillary`, `osm`, `google`, `gemini`, `openai`), model IDs (`gemini_model`, `openai_model`), and API keys are configured in `models.conf` (git-ignored, templated from `models.conf.example`), while system settings and declarative provider plugin definitions live in `streetreaderai.conf` (templated from `streetreaderai.conf.example`).
+* **Server-Side Key Isolation**: `models.conf` and `streetreaderai.conf` are read on the server by `src/server.ts`. Real API keys must never be exposed to the browser; `GET /api/config` replaces non-empty keys with `__SERVER_KEY:<name>__` placeholders, and `POST /api/proxy` substitutes real keys on the server.
 * **Obtaining Keys**: The developer (user) can and will provide actual, functional API keys (e.g. Google Maps, Gemini, and Mapillary keys) when requested by the agent.
 * Avoid hardcoding any credentials or API keys in source files.
 
@@ -56,8 +57,8 @@ Welcome! As an AI development assistant (Gemini, Antigravity, Jetski, etc.) work
 ## 5. Local Setup & Testing Guidelines
 
 ### 🛠️ Setting Up The Repository
-* **Automated Setup**: Run `make setup` (or `npm install`) to install Node.js packages at the repository root and create `streetreaderai.conf` from `streetreaderai.conf.example`.
-* **Configuration**: External service providers and API keys are configured in `streetreaderai.conf`.
+* **Automated Setup**: Run `make setup` (or `npm install`) to install Node.js packages at the repository root and create `models.conf` (from `models.conf.example`) and `streetreaderai.conf` (from `streetreaderai.conf.example`).
+* **Configuration**: External service providers, model versions, and API keys are configured in `models.conf`; system settings and declarative provider URL/JSON mappings are configured in `streetreaderai.conf`.
 
 ### 🧪 Running Tests
 Always run the local test suite when making changes to verify correctness before pushing:

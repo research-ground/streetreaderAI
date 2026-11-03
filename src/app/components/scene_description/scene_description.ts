@@ -88,13 +88,17 @@ export class SceneDescriptionComponent implements OnDestroy {
     const autoDescribe = this.stateService.autoDescribe();
 
     // Reset description to ensure change detection for screen readers
-    this.stateService.setMetadata({ description: null });
+    this.stateService.setMetadata({ description: null, suggestedQuestions: [] });
 
     // 1. Check cache first if not forced
     if (!force) {
-      const cachedDescription = this.cache.get(loc.lat, loc.lng, heading, loc.imageId);
-      if (cachedDescription) {
-        this.processDescription(cachedDescription, true);
+      const cachedEntry = this.cache.getEntry(loc.lat, loc.lng, heading, loc.imageId);
+      if (cachedEntry) {
+        this.processDescription(
+          cachedEntry.description,
+          true,
+          cachedEntry.suggestedQuestions
+        );
         return;
       }
     }
@@ -119,8 +123,19 @@ export class SceneDescriptionComponent implements OnDestroy {
       .subscribe({
         next: (response) => {
           if (response && response.description) {
-            this.cache.set(loc.lat, loc.lng, heading, response.description, loc.imageId);
-            this.processDescription(response.description, false);
+            this.cache.set(
+              loc.lat,
+              loc.lng,
+              heading,
+              response.description,
+              loc.imageId,
+              response.suggestedQuestions
+            );
+            this.processDescription(
+              response.description,
+              false,
+              response.suggestedQuestions
+            );
           } else {
             this.processDescription('Could not generate a description for this view.', false);
           }
@@ -138,7 +153,11 @@ export class SceneDescriptionComponent implements OnDestroy {
       });
   }
 
-  private processDescription(baseDesc: string, isCached: boolean) {
+  private processDescription(
+    baseDesc: string,
+    isCached: boolean,
+    suggestedQuestions?: string[]
+  ) {
     let finalDesc = baseDesc;
     
     const directions = this.availableDirections();
@@ -157,7 +176,12 @@ export class SceneDescriptionComponent implements OnDestroy {
       }
     }
 
-    this.stateService.setMetadata({ description: finalDesc + (isCached ? ' (cached)' : '') });
+    this.stateService.setMetadata({
+      description: finalDesc + (isCached ? ' (cached)' : ''),
+      ...(suggestedQuestions && suggestedQuestions.length > 0
+        ? { suggestedQuestions }
+        : {}),
+    });
     this.speechOutputService.speak(finalDesc);
   }
 }

@@ -155,4 +155,51 @@ google_maps_api_key =
     expect(err).toContain('mapillary_token (required by [imagery.mapillary])');
     expect(err).toContain('google_maps_api_key (required by [location.google])');
   });
+
+  it('supports [providers] and [models] from models.conf and routes __SERVER_KEY placeholders through /api/proxy', async () => {
+    const service = TestBed.inject(ConfigService);
+    service.applyConfText(`
+[providers]
+ai_provider = gemini
+imagery_provider = panoramax
+location_provider = osm
+
+[models]
+gemini_model = gemini-3.8-flash
+openai_model = gpt-5.6-terra
+
+[keys]
+gemini_api_key = __SERVER_KEY_ENV:gemini_api_key__
+    `);
+
+    expect(service.aiProvider()).toBe('gemini');
+    expect(service.isGeminiLocked()).toBe(true);
+    expect(service.validateRequiredKeys()).toBeNull();
+    expect(service.getAiPlugin('gemini')?.modelId).toBe('gemini-3.8-flash');
+
+    const origFetch = globalThis.fetch;
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ url: String(input), init });
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }) as typeof fetch;
+
+    try {
+      await service.proxiedFetch(
+        'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=__SERVER_KEY_ENV:gemini_api_key__',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contents: [] }),
+        }
+      );
+      expect(calls.length).toBe(1);
+      expect(calls[0].url).toBe('/api/proxy');
+      expect(calls[0].init?.method).toBe('POST');
+      const payload = JSON.parse(String(calls[0].init?.body || '{}'));
+      expect(payload.url).toContain('__SERVER_KEY_ENV:gemini_api_key__');
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+  });
 });

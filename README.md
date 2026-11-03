@@ -31,19 +31,21 @@ Because the repository is public and uses open defaults (**Panoramax** for 360°
 
 #### Install, Configure & Launch
 ```bash
-# 1. Install frontend dependencies and create streetreaderai.conf from streetreaderai.conf.example
+# 1. Install dependencies and create models.conf & streetreaderai.conf from .example templates
 make setup
 ```
 
-Open `streetreaderai.conf` in any text editor and add your AI API key under `[keys]`:
+Open `models.conf` in any text editor to select your active providers, model versions, and API keys:
 
 ```ini
-[system]
+[providers]
+ai_provider = gemini
 imagery_provider = panoramax
 location_provider = osm
-ai_provider = gemini
-starting_address = 601 N 34th St, Seattle, WA
-max_poi_items = 3
+
+[models]
+gemini_model = gemini-3.8-flash
+openai_model = gpt-5.6-terra
 
 [keys]
 gemini_api_key = YOUR_GEMINI_API_KEY
@@ -52,7 +54,17 @@ mapillary_token =
 google_maps_api_key =
 ```
 
-> **Note**: StreetReaderAI loads its default configuration from [`streetreaderai.conf.example`](streetreaderai.conf.example) and overlays any settings or API keys you define in `streetreaderai.conf`. `streetreaderai.conf` is git-ignored so your personal API keys are never committed (always edit `streetreaderai.conf` rather than `streetreaderai.conf.example`). If a required key for the active providers in `[system]` is missing on launch, StreetReaderAI displays a **Configuration Error** dialog identifying which key to add. See **[Configuring Data & AI Providers](docs/configuration.md)** for full details on switching or adding providers.
+> **Note**: StreetReaderAI reads `models.conf` (and `streetreaderai.conf`) **exclusively on the Node.js server (`src/server.ts`)** so your personal API keys are never sent to the browser. Both `models.conf` and `streetreaderai.conf` are git-ignored so secrets are never committed (always edit `models.conf` rather than `models.conf.example`). If a required key for the active providers in `[providers]` is missing on launch, StreetReaderAI displays a **Configuration Error** dialog identifying which key to add.
+
+#### Changing AI, Imagery, or Location Providers
+All provider selections, model versions, and API keys are controlled in `models.conf` (rather than in the browser UI) so credentials stay on the server:
+* **Switch AI Provider (`gemini` ↔ `openai`)**:
+  1. In `models.conf`, set `ai_provider = openai` (or `ai_provider = gemini`) under `[providers]`.
+  2. Add the corresponding API key (`openai_api_key = sk-...` or `gemini_api_key = AIza...`) under `[keys]`.
+  3. *(Optional)* Customize the model version under `[models]` (e.g., `gemini_model = gemini-3.8-flash` or `openai_model = gpt-5.6-terra`).
+* **Switch Street Imagery or Location Provider**:
+  * Set `imagery_provider = panoramax | mapillary | google` and `location_provider = osm | google` under `[providers]`, and supply `mapillary_token` or `google_maps_api_key` under `[keys]` if required.
+* **Apply Changes**: Save `models.conf` and refresh the browser page (`src/server.ts` re-reads `models.conf` on every page load—no server restart required). See **[Configuring Data & AI Providers](docs/configuration.md)** for full details on switching or adding custom providers.
 
 Start the development server:
 
@@ -102,14 +114,20 @@ When StreetReaderAI opens for the first time, the **Welcome** dialog lets you co
 
 ## System Architecture
 
-StreetReaderAI is architected as a **100% client-side Angular Single-Page Application (SPA)** with no custom backend server required:
+StreetReaderAI uses a **client-heavy Angular Single-Page Application (SPA) paired with a lightweight Node.js/Express server-side key & proxy shim ([`src/server.ts`](src/server.ts))**:
 
-* **Angular Web Application (`src/`)**: Runs entirely in the user's browser. During development it is served by `ng serve` (`make start`), and in production `make build` compiles a static bundle (`dist/StreetReaderAI/browser`) that can run in Google AI Studio or be hosted on any static web server (Nginx, Apache, GitHub Pages, Cloud Run, etc.).
-* **Declarative Configuration (`streetreaderai.conf`)**: Rather than hardcoding provider logic, [`ConfigService`](src/app/services/config_service.ts) loads `streetreaderai.conf` on startup to configure four external service categories via URL templates and JSON dot-path field mappings:
-  1. **Road Network & Routing ([`RoadDataService`](src/app/services/road_data_service.ts) & [`RouteProviderService`](src/app/services/route_provider_service.ts))**: Fetches local walkable/drivable street geometry from the OpenStreetMap v0.6 API (`/api/0.6/map.json`, with Overpass API fallback), merges multi-node junctions into unified intersections (`osm_<id>`), and connects adjacent intersections using validated camera sequences (`seq_<imageId>`).
-  2. **Street-Level Imagery ([`ImageryProviderService`](src/app/services/imagery_provider_service.ts) & [`PanoramaCropService`](src/app/services/panorama_crop_service.ts))**: Supports both sequence-based 360° equirectangular providers (`retrieval_type = sequence`, `image_format = 360`, such as **Panoramax** and **Mapillary**, cropped into rectilinear viewports in-browser via HTML5 `<canvas>`) and point-sampled directional providers (`retrieval_type = image`, `image_format = single`).
-  3. **Geocoding & Points of Interest ([`LocationProviderService`](src/app/services/location_provider_service.ts))**: Handles forward/reverse geocoding, debounced address autocomplete, and observer-relative POI discovery using **OpenStreetMap** (Nominatim + zero-extra-call extraction from cached OSM road tiles) or **Google Maps Platform** (Geocoding + Places API v1).
-  4. **Multimodal Vision-Language Model ([`AiProviderService`](src/app/services/ai_provider_service.ts))**: Sends the current viewport image to **Google Gemini** (`gemini-3.8-flash`) or **OpenAI** (`gpt-5.6-terra`) to generate blind-traveler-oriented scene descriptions and structured visual Q&A responses with optional navigation action detection.
+* **Why Client + Server Shim?**: Originally, StreetReaderAI ran 100% in the browser. However, Google AI Studio requires all Gemini API calls to execute on the server (`MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API` in [`metadata.json`](metadata.json)), and keeping API keys (`gemini_api_key`, `openai_api_key`, `mapillary_token`, `google_maps_api_key`) strictly on the server prevents secrets from ever leaking into browser bundles or DevTools network logs. To preserve the simplicity of the client-side architecture without duplicating provider logic on the server:
+  * **All navigation, road-graph solving, and 360° `<canvas>` panorama projection remain 100% client-side** (`RenderMode.Client` in [`src/main.server.ts`](src/main.server.ts)).
+  * **Server-Side Key & Proxy Shim ([`src/server.ts`](src/server.ts))**: Reads `models.conf` and `streetreaderai.conf` on the server and exposes two lightweight routes:
+    1. `GET /api/config`: Serves the merged configuration to the browser with all non-empty `[keys]` replaced by opaque placeholders (`__SERVER_KEY:<key_name>__`).
+    2. `POST /api/proxy`: Accepts outbound API requests containing `__SERVER_KEY:...__` placeholders, validates the target hostname against the allowlist of configured provider domains, substitutes the real API key in server memory, and executes Gemini `generateContent` requests via the official `@google/genai` SDK (`User-Agent: aistudio-build`). Public key-free requests (such as OpenStreetMap and Panoramax) still go directly from the browser.
+* **Declarative Two-File Configuration (`models.conf` + `streetreaderai.conf`)**:
+  * **[`models.conf`](models.conf.example)**: Top-level configuration for selecting active `[providers]` (`ai_provider`, `imagery_provider`, `location_provider`), `[models]` (`gemini_model`, `openai_model`), and secret `[keys]`.
+  * **[`streetreaderai.conf`](streetreaderai.conf.example)**: System defaults (`starting_address`, `max_poi_items`) and declarative URL templates / JSON dot-path field mappings for four external service categories:
+    1. **Road Network & Routing ([`RoadDataService`](src/app/services/road_data_service.ts) & [`RouteProviderService`](src/app/services/route_provider_service.ts))**: Fetches local walkable/drivable street geometry from the OpenStreetMap v0.6 API (`/api/0.6/map.json`, with Overpass API fallback), merges multi-node junctions into unified intersections (`osm_<id>`), and connects adjacent intersections using validated camera sequences (`seq_<imageId>`).
+    2. **Street-Level Imagery ([`ImageryProviderService`](src/app/services/imagery_provider_service.ts) & [`PanoramaCropService`](src/app/services/panorama_crop_service.ts))**: Supports both sequence-based 360° equirectangular providers (`retrieval_type = sequence`, `image_format = 360`, such as **Panoramax** and **Mapillary**, cropped into rectilinear viewports in-browser via HTML5 `<canvas>`) and point-sampled directional providers (`retrieval_type = image`, `image_format = single`).
+    3. **Geocoding & Points of Interest ([`LocationProviderService`](src/app/services/location_provider_service.ts))**: Handles forward/reverse geocoding, debounced address autocomplete, and observer-relative POI discovery using **OpenStreetMap** (Nominatim + zero-extra-call extraction from cached OSM road tiles) or **Google Maps Platform** (Geocoding + Places API v1).
+    4. **Multimodal Vision-Language Model ([`AiProviderService`](src/app/services/ai_provider_service.ts))**: Sends the current viewport image to **Google Gemini** (`gemini-3.8-flash`) or **OpenAI** (`gpt-5.6-terra`) through `/api/proxy` to generate blind-traveler-oriented scene descriptions and structured visual Q&A responses with optional navigation action detection.
 * **In-Browser Caching ([`client_cache.ts`](src/app/services/client_cache.ts))**: Multi-layer in-memory LRU caches (`roadCache`, `osmPoiTileCache`, `windowCache`, `metadataCache`, `graphCache`, and `PanoramaCropService`'s decoded pixel buffer cache) plus `singleflight` request deduplication ensure that exploring a neighborhood or rotating in place minimizes external API calls.
 
 ---
@@ -120,7 +138,7 @@ StreetReaderAI is architected as a **100% client-side Angular Single-Page Applic
 # Run the offline unit test suite (Vitest + Angular TestBed)
 make test
 
-# Build the static production bundle into dist/StreetReaderAI/browser
+# Build the production browser + Express server bundle into dist/StreetReaderAI
 make build
 ```
 

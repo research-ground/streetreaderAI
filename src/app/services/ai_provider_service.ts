@@ -31,7 +31,9 @@ export const CHAT_PREAMBLE =
   'as tracking license plates. We do not allow bulk downloading or scraping.';
 
 export const DESCRIPTION_PROMPT = `
-Provide a brief (2-3 sentence) description of the current image. This will be shared with a blind traveler. The goal is to describe the area depicted rather than the specific image, so do not describe ephemeral elements like weather or cars, instead focus on the street layout, nearby buildings and other features.
+Provide a brief (2-3 sentence) description of the current image for a blind traveler. Focus on the street layout, nearby buildings, storefronts, and permanent navigation features rather than ephemeral elements like weather or passing cars.
+
+Also generate 4 short, specific follow-up questions (under 12 words each) that the traveler might ask to learn more about concrete visual details actually visible in this scene (for example, asking about a specific visible storefront, sign, building feature, sidewalk layout, crossing, or landmark in the image). Do not ask generic questions about things that are not in the image, and do not simply repeat facts you already stated in the description.
 `.trim();
 
 export function buildQuestionPrompt(
@@ -117,11 +119,9 @@ export class AiProviderService {
     }
     const cleanBase64 = stripDataUrlPrefix(imageBase64);
     const plugin = this.getActivePlugin();
-    const description =
-      plugin.wireFormat === 'openai'
-        ? await this.openaiDescribe(plugin, cleanBase64)
-        : await this.geminiDescribe(plugin, cleanBase64);
-    return { description };
+    return plugin.wireFormat === 'openai'
+      ? this.openaiDescribe(plugin, cleanBase64)
+      : this.geminiDescribe(plugin, cleanBase64);
   }
 
   async askQuestion(
@@ -152,7 +152,7 @@ export class AiProviderService {
       model: plugin.modelId,
       apiKey,
     });
-    return fetch(url, {
+    return this.config.proxiedFetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -162,7 +162,7 @@ export class AiProviderService {
   private async geminiDescribe(
     plugin: AiPluginConfig,
     cleanBase64: string
-  ): Promise<string> {
+  ): Promise<DescribeImageResponse> {
     const resp = await this.fetchGemini(plugin, {
       contents: [
         {
@@ -183,8 +183,12 @@ export class AiProviderService {
           type: 'OBJECT',
           properties: {
             description: { type: 'STRING' },
+            suggestedQuestions: {
+              type: 'ARRAY',
+              items: { type: 'STRING' },
+            },
           },
-          required: ['description'],
+          required: ['description', 'suggestedQuestions'],
         },
       },
     });
@@ -201,13 +205,22 @@ export class AiProviderService {
       data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
     try {
       const parsed = JSON.parse(rawText);
+      const suggestedQuestions = Array.isArray(parsed?.suggestedQuestions)
+        ? parsed.suggestedQuestions
+            .map((q: unknown) => String(q || '').trim())
+            .filter(Boolean)
+            .slice(0, 4)
+        : undefined;
       if (parsed?.description) {
-        return String(parsed.description);
+        return {
+          description: String(parsed.description),
+          suggestedQuestions,
+        };
       }
     } catch {
       // If plain text returned, return directly
     }
-    return String(rawText).trim();
+    return { description: String(rawText).trim() };
   }
 
   private async geminiAsk(
@@ -289,9 +302,9 @@ export class AiProviderService {
   private async openaiDescribe(
     plugin: AiPluginConfig,
     cleanBase64: string
-  ): Promise<string> {
+  ): Promise<DescribeImageResponse> {
     const key = this.ensurePluginKey(plugin);
-    const resp = await fetch(plugin.endpointUrl, {
+    const resp = await this.config.proxiedFetch(plugin.endpointUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -299,6 +312,25 @@ export class AiProviderService {
       },
       body: JSON.stringify({
         model: plugin.modelId,
+        response_format: {
+          type: 'json_schema',
+          json_schema: {
+            name: 'describe_response',
+            strict: true,
+            schema: {
+              type: 'object',
+              properties: {
+                description: { type: 'string' },
+                suggestedQuestions: {
+                  type: 'array',
+                  items: { type: 'string' },
+                },
+              },
+              required: ['description', 'suggestedQuestions'],
+              additionalProperties: false,
+            },
+          },
+        },
         messages: [
           {
             role: 'user',
@@ -313,7 +345,7 @@ export class AiProviderService {
             ],
           },
         ],
-        max_tokens: 300,
+        max_tokens: 450,
       }),
     });
 
@@ -325,7 +357,25 @@ export class AiProviderService {
     }
 
     const data = await resp.json();
-    return String(data?.choices?.[0]?.message?.content || '').trim();
+    const rawContent = String(data?.choices?.[0]?.message?.content || '').trim();
+    try {
+      const parsed = JSON.parse(rawContent);
+      const suggestedQuestions = Array.isArray(parsed?.suggestedQuestions)
+        ? parsed.suggestedQuestions
+            .map((q: unknown) => String(q || '').trim())
+            .filter(Boolean)
+            .slice(0, 4)
+        : undefined;
+      if (parsed?.description) {
+        return {
+          description: String(parsed.description),
+          suggestedQuestions,
+        };
+      }
+    } catch {
+      // Fallback to plain text if provider returned non-JSON content
+    }
+    return { description: rawContent };
   }
 
   private async openaiAsk(
@@ -337,7 +387,7 @@ export class AiProviderService {
     const key = this.ensurePluginKey(plugin);
     const prompt = buildQuestionPrompt(question, detectActions);
 
-    const resp = await fetch(plugin.endpointUrl, {
+    const resp = await this.config.proxiedFetch(plugin.endpointUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
