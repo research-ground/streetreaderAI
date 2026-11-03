@@ -279,9 +279,10 @@ app.post('/api/proxy', async (req, res) => {
     ) {
       const modelId = decodeURIComponent(geminiMatch[1]);
       const apiKey =
-        parsedUrl.searchParams.get('key') ||
         state.secretKeys.get('gemini_api_key') ||
         process.env['GEMINI_API_KEY'] ||
+        process.env['API_KEY'] ||
+        parsedUrl.searchParams.get('key') ||
         '';
       const parsedBody = JSON.parse(rawBody) as {
         contents?: unknown;

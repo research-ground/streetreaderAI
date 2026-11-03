@@ -287,11 +287,6 @@ export function interpolateUrlTemplate(
 function readInjectedEnv(key: string): string {
   try {
     const g = globalThis as Record<string, unknown>;
-    const proc = g['process'] as { env?: Record<string, unknown> } | undefined;
-    const fromProc = proc?.env?.[key];
-    if (typeof fromProc === 'string' && fromProc.trim()) {
-      return fromProc.trim();
-    }
     const fromGlobal = g[`__STREETREADER_${key}__`];
     if (typeof fromGlobal === 'string' && fromGlobal.trim()) {
       return fromGlobal.trim();
@@ -352,7 +347,7 @@ export class ConfigService {
 
   readonly imageryProvider = this._imageryProvider.asReadonly();
   readonly mapillaryToken = computed<string>(
-    () => this._envMapillaryToken() || this._mapillaryToken()
+    () => this._mapillaryToken() || this._envMapillaryToken()
   );
 
   readonly locationService = computed<LocationProviderType>(() =>
@@ -360,7 +355,7 @@ export class ConfigService {
   );
 
   readonly googleMapsApiKey = computed<string>(() =>
-    this._envGoogleMapsKey() || this._googleMapsApiKey()
+    this._googleMapsApiKey() || this._envGoogleMapsKey()
   );
 
   readonly aiProvider = computed<AiProviderType>(() =>
@@ -368,11 +363,11 @@ export class ConfigService {
   );
 
   readonly geminiApiKey = computed<string>(() =>
-    this._envGeminiKey() || this._geminiApiKey()
+    this._geminiApiKey() || this._envGeminiKey()
   );
 
   readonly openaiApiKey = computed<string>(
-    () => this._envOpenaiKey() || this._openaiApiKey()
+    () => this._openaiApiKey() || this._envOpenaiKey()
   );
   readonly startingAddress = this._startingAddress.asReadonly();
   readonly maxPoiItems = this._maxPoiItems.asReadonly();
@@ -442,7 +437,8 @@ export class ConfigService {
       }
     }
 
-    if (!isServerKeyPlaceholder(url) && !headersHaveServerKey) {
+    const isGeminiEndpoint = url.includes('generativelanguage.googleapis.com');
+    if (!isServerKeyPlaceholder(url) && !headersHaveServerKey && !isGeminiEndpoint) {
       return fetch(url, init);
     }
 

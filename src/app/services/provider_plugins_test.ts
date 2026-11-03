@@ -288,7 +288,10 @@ place_id_field = pid
 
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       const url = String(input);
-      if (url.includes('generativelanguage.googleapis.com')) {
+      if (
+        url.includes('generativelanguage.googleapis.com') ||
+        url === '/api/proxy'
+      ) {
         return new Response(
           JSON.stringify({
             candidates: [
