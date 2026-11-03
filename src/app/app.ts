@@ -151,10 +151,10 @@ export class App implements OnInit, OnDestroy {
     this.apiService.getConfig().subscribe({
       next: (cfg) => {
         this.startingAddress = cfg.startingAddress || '601 N 34th St, Seattle, WA';
-        this.navigationService.loadLocationWithHeading(this.startingAddress, 0);
+        this.navigationService.loadLocationWithHeading(this.startingAddress, 107);
       },
       error: () => {
-        this.navigationService.loadLocationWithHeading(this.startingAddress, 0);
+        this.navigationService.loadLocationWithHeading(this.startingAddress, 107);
       }
     });
   }

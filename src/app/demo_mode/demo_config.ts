@@ -68,7 +68,7 @@ export const DEMO_LOCATIONS: DemoLocation[] = [
     address: '601 N 34th St, Seattle, WA',
     latitude: 47.64948,
     longitude: -122.34979,
-    heading: 356,
+    heading: 107,
     questions: GENERIC_QUESTIONS,
   },
   {

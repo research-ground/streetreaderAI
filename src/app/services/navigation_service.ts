@@ -55,6 +55,7 @@ export class NavigationService {
 
   /** Initial-boot address load with an explicit facing heading. */
   loadLocationWithHeading(address?: string, heading: number = 0) {
+    this.stateService.setHeading(heading);
     this.land({ address, heading });
   }
 

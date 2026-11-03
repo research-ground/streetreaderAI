@@ -77,42 +77,54 @@ export class SpeechInputService {
   readonly listening = this.isListening.asReadonly();
   readonly transcription$ = this.transcriptionSubject.asObservable();
 
-  constructor() {
-    const SpeechRecognition = (window as unknown as WindowWithSpeech).SpeechRecognition || 
-                              (window as unknown as WindowWithSpeech).webkitSpeechRecognition;
-    if (SpeechRecognition) {
-      this.recognition = new SpeechRecognition();
-      this.recognition.continuous = false;
-      this.recognition.interimResults = false;
-      this.recognition.lang = 'en-US';
-
-      this.recognition.onstart = () => {
-        this.isListening.set(true);
-      };
-
-      this.recognition.onresult = (event: SpeechRecognitionEvent) => {
-        const transcript = event.results[0][0].transcript;
-        this.transcriptionSubject.next(transcript);
-      };
-
-      this.recognition.onend = () => {
-        this.isListening.set(false);
-      };
-
-      this.recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
-        console.error(`[SpeechService] Recognition error: ${event.error}`);
-        this.isListening.set(false);
-      };
-    } else {
-      console.error('Speech recognition not supported in this browser.');
+  private ensureRecognition(): ISpeechRecognition | undefined {
+    if (this.recognition) {
+      return this.recognition;
     }
+    if (typeof window === 'undefined') {
+      return undefined;
+    }
+    const SpeechRecognition =
+      (window as unknown as WindowWithSpeech).SpeechRecognition ||
+      (window as unknown as WindowWithSpeech).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      console.error('Speech recognition not supported in this browser.');
+      return undefined;
+    }
+
+    this.recognition = new SpeechRecognition();
+    this.recognition.continuous = false;
+    this.recognition.interimResults = false;
+    this.recognition.lang = 'en-US';
+
+    this.recognition.onstart = () => {
+      this.isListening.set(true);
+    };
+
+    this.recognition.onresult = (event: SpeechRecognitionEvent) => {
+      const transcript = event.results[0][0].transcript;
+      this.transcriptionSubject.next(transcript);
+    };
+
+    this.recognition.onend = () => {
+      this.isListening.set(false);
+    };
+
+    this.recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+      console.error(`[SpeechService] Recognition error: ${event.error}`);
+      this.isListening.set(false);
+    };
+
+    return this.recognition;
   }
 
   startListening() {
-    if (!this.recognition || this.isListening()) return;
-    
+    if (this.isListening()) return;
+    const recognition = this.ensureRecognition();
+    if (!recognition) return;
+
     this.playBeep().then(() => {
-      this.recognition?.start();
+      recognition.start();
     });
   }
 
