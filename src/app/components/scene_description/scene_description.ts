@@ -24,7 +24,8 @@ import { DescriptionCacheService } from '../../services/description_cache_servic
 import { SpeechOutputService } from '../../services/speech_output_service';
 import { StreetViewLinksService } from '../../services/street_view_links_service';
 import { describeError } from '../../services/config_service';
-import { Subscription, Subject, takeUntil, debounce, timer, of } from 'rxjs';
+import { Subscription, Subject, takeUntil, debounce, timer, of, finalize } from 'rxjs';
+import { AppController } from '../../services/app_controller';
 
 @Component({
   selector: 'app-scene-description',
@@ -40,6 +41,9 @@ export class SceneDescriptionComponent implements OnDestroy {
   private cache = inject(DescriptionCacheService);
   private speechOutputService = inject(SpeechOutputService);
   private streetViewLinksService = inject(StreetViewLinksService);
+  private appController = inject(AppController);
+  /** Incremented per description request so stale requests can't change loading state. */
+  private requestId = 0;
   private subscription: Subscription;
   private destroy$ = new Subject<void>();
   private currentFetch$ = new Subject<void>();
@@ -67,7 +71,7 @@ export class SceneDescriptionComponent implements OnDestroy {
 
     this.descriptionService.cancel$.pipe(takeUntil(this.destroy$)).subscribe(() => {
       this.currentFetch$.next();
-      this.isLoading.set(false);
+      this.setLoading(false);
     });
   }
 
@@ -79,9 +83,16 @@ export class SceneDescriptionComponent implements OnDestroy {
     this.destroy$.complete();
   }
 
+  /** Keeps the panel progress bar and the status bar "(Describing...)" in sync. */
+  private setLoading(loading: boolean) {
+    this.isLoading.set(loading);
+    this.appController.setWaitingOnDescription(loading);
+  }
+
   private fetchDescription(force: boolean = false) {
-    // Cancel any previous pending request
+    // Cancel any previous pending request; it no longer owns the loading state
     this.currentFetch$.next();
+    this.setLoading(false);
 
     const loc = this.stateService.currentLocation();
     const heading = this.stateService.currentHeading();
@@ -117,10 +128,17 @@ export class SceneDescriptionComponent implements OnDestroy {
       return;
     }
 
-    this.isLoading.set(true);
-    
+    const requestId = ++this.requestId;
+    this.setLoading(true);
+
     this.apiService.describeImage(image)
-      .pipe(takeUntil(this.currentFetch$))
+      .pipe(
+        takeUntil(this.currentFetch$),
+        // Runs on success, error, or cancellation
+        finalize(() => {
+          if (requestId === this.requestId) this.setLoading(false);
+        })
+      )
       .subscribe({
         next: (response) => {
           if (response && response.description) {
@@ -140,13 +158,11 @@ export class SceneDescriptionComponent implements OnDestroy {
           } else {
             this.processDescription('Could not generate a description for this view.', false);
           }
-          this.isLoading.set(false);
         },
         error: (err) => {
           console.error('Error fetching description:', err);
           const msg = describeError(err, 'An error occurred while fetching the description.');
           this.processDescription(msg, false);
-          this.isLoading.set(false);
         }
       });
   }

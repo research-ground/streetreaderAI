@@ -356,6 +356,38 @@ openai_api_key = TestOpenAiKey
     );
   });
 
+  it('restores the real upstream status from X-Upstream-Status (AI Studio-safe proxy errors)', async () => {
+    const config = TestBed.inject(ConfigService);
+    const ai = TestBed.inject(AiProviderService);
+    config.applyConfText(`
+[system]
+ai_provider = gemini
+
+[keys]
+gemini_api_key = TestGeminiKey
+    `);
+    // What src/server.ts sends for a Gemini 503: HTTP 200 + header + JSON error
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          error: {
+            code: 503,
+            status: 'UNAVAILABLE',
+            message: 'This model is currently experiencing high demand.',
+          },
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', 'X-Upstream-Status': '503' },
+        }
+      )
+    );
+    const msg = await ai.describeImage('base64img').catch((e: Error) => e.message);
+    expect(msg).toBe(
+      'gemini API error (HTTP 503 (UNAVAILABLE)): This model is currently experiencing high demand.'
+    );
+  });
+
   it('describeImage errors report HTTP codes and never include HTML bodies', async () => {
     const config = TestBed.inject(ConfigService);
     const ai = TestBed.inject(AiProviderService);
@@ -387,7 +419,7 @@ gemini_api_key = TestGeminiKey
     );
     const err200 = await ai.describeImage('base64img').catch((e: Error) => e.message);
     expect(err200).toContain('HTTP 200');
-    expect(err200).toContain('expected a JSON response');
+    expect(err200).toMatch(/instead of JSON|replaced by/);
     expect(err200).not.toContain('<');
 
     // JSON error from Gemini keeps its code, status, and message

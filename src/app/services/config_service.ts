@@ -358,6 +358,16 @@ export function formatApiErrorResponse(
   return `${providerName} API error (${statusCodeLabel}): ${detail}`;
 }
 
+/** Host + path of a request URL, without the query string (which may hold keys). */
+export function describeRequestTarget(url: string): string {
+  try {
+    const u = new URL(url, typeof location !== 'undefined' ? location.href : 'http://localhost');
+    return `${u.host}${u.pathname}`;
+  } catch {
+    return url.split('?')[0];
+  }
+}
+
 /**
  * Converts any thrown value into the text shown to the user. All UI error
  * displays (description panel, chat, dialogs, toasts) must use this.
@@ -527,7 +537,7 @@ export class ConfigService {
       return fetch(url, init);
     }
 
-    return fetch('/api/proxy', {
+    const proxyResp = await fetch('/api/proxy', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -538,6 +548,18 @@ export class ConfigService {
       }),
       signal: init?.signal,
     });
+
+    // `/api/proxy` reports failures as HTTP 200 + `X-Upstream-Status` (so hosting
+    // front-ends like AI Studio cannot replace them with HTML error pages).
+    // Restore the real status so every caller sees the true HTTP error.
+    const upstreamStatus = Number(proxyResp.headers.get('X-Upstream-Status'));
+    if (upstreamStatus >= 400 && upstreamStatus <= 599) {
+      return new Response(await proxyResp.text(), {
+        status: upstreamStatus,
+        headers: proxyResp.headers,
+      });
+    }
+    return proxyResp;
   }
 
   /**
@@ -563,8 +585,13 @@ export class ConfigService {
       return JSON.parse(bodyText) as T;
     } catch {
       const contentType = resp.headers.get('content-type') || 'unknown content type';
+      const via = resp.url && new URL(resp.url, location.href).pathname === '/api/proxy' ? ' via /api/proxy' : '';
+      // Log the body to the console for debugging; never show it in the UI.
+      console.error(`[${label}] Non-JSON response from ${describeRequestTarget(url)}${via}:`, bodyText.slice(0, 2000));
       throw new Error(
-        `${label} API error (HTTP ${resp.status}): expected a JSON response but received ${contentType}.`
+        via
+          ? `${label} API error (HTTP ${resp.status}): the app server's /api/proxy response was replaced by a ${contentType} page from the hosting environment (the server may be restarting or overloaded).`
+          : `${label} API error (HTTP ${resp.status}): ${describeRequestTarget(url)} returned ${contentType} instead of JSON.`
       );
     }
   }

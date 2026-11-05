@@ -188,9 +188,19 @@ function replaceServerKeyPlaceholders(
 }
 
 /**
- * Sends a JSON error `{error: {code, status, message}}`. `message` is only set
- * from trusted sources (JSON error bodies or local error strings), never from
- * raw upstream response bodies.
+ * Header carrying the real HTTP status of a failed `/api/*` call.
+ *
+ * `/api/*` errors are always sent with HTTP 200: hosting front-ends such as the
+ * Google AI Studio preview proxy replace 5xx responses from the app with their
+ * own HTML "Service Unavailable" page, which hides the real error. The client
+ * (`ConfigService.proxiedFetch`) restores the real status from this header.
+ */
+const UPSTREAM_STATUS_HEADER = 'X-Upstream-Status';
+
+/**
+ * Sends a JSON error `{error: {code, status, message}}` with the real status in
+ * `X-Upstream-Status`. `message` is only set from trusted sources (JSON error
+ * bodies or local error strings), never from raw upstream response bodies.
  */
 function sendJsonError(
   res: express.Response,
@@ -198,13 +208,33 @@ function sendJsonError(
   statusText?: string,
   message: string = ''
 ): void {
-  res.status(code).json({
-    error: {
-      code,
-      status: statusText || http.STATUS_CODES[code] || '',
-      message,
-    },
-  });
+  const status = statusText || http.STATUS_CODES[code] || '';
+  console.warn(
+    `[api] ${res.req.method} ${res.req.originalUrl} -> ${code} ${status}` +
+      `${res.locals['target'] ? ` (target: ${res.locals['target']})` : ''}${message ? `: ${message}` : ''}`
+  );
+  res.setHeader(UPSTREAM_STATUS_HEADER, String(code));
+  res.status(200).json({ error: { code, status, message } });
+}
+
+/** Extracts `{status, message}` from common JSON error body shapes. */
+function parseJsonErrorBody(text: string): { status?: string; message?: string } {
+  try {
+    const body = JSON.parse(text) as {
+      error?: string | { status?: string; type?: string; message?: string };
+      message?: string;
+    };
+    if (typeof body.error === 'string') return { message: body.error };
+    if (body.error && typeof body.error === 'object') {
+      return {
+        status: body.error.status || body.error.type,
+        message: body.error.message,
+      };
+    }
+    return { message: typeof body.message === 'string' ? body.message : undefined };
+  } catch {
+    return {};
+  }
 }
 
 const app = express();
@@ -245,7 +275,7 @@ app.post('/api/proxy', async (req, res) => {
     };
 
     if (!rawUrl || typeof rawUrl !== 'string') {
-      res.status(400).json({ error: 'Missing target url in /api/proxy request.' });
+      sendJsonError(res, 400, undefined, 'Missing target url in /api/proxy request.');
       return;
     }
 
@@ -258,15 +288,20 @@ app.post('/api/proxy', async (req, res) => {
     try {
       parsedUrl = new URL(resolvedUrl);
     } catch {
-      res.status(400).json({ error: 'Invalid target url in /api/proxy request.' });
+      sendJsonError(res, 400, undefined, 'Invalid target url in /api/proxy request.');
       return;
     }
 
     const targetHost = parsedUrl.hostname.toLowerCase();
+    // Host + path only (no query string, which may contain keys), for logging
+    res.locals['target'] = `${targetHost}${parsedUrl.pathname}`;
     if (!state.allowedHosts.has(targetHost)) {
-      res.status(403).json({
-        error: `Target host "${targetHost}" is not in the configured provider allowlist.`,
-      });
+      sendJsonError(
+        res,
+        403,
+        undefined,
+        `Target host "${targetHost}" is not in the configured provider allowlist.`
+      );
       return;
     }
 
@@ -341,9 +376,13 @@ app.post('/api/proxy', async (req, res) => {
       // plain text, etc.) report only the HTTP status code and status text.
       const contentType = (upstreamResp.headers.get('content-type') || '').toLowerCase();
       if (contentType.includes('json')) {
-        res.status(upstreamResp.status);
-        res.setHeader('Content-Type', 'application/json; charset=utf-8');
-        res.send(Buffer.from(await upstreamResp.arrayBuffer()));
+        const parsedErr = parseJsonErrorBody(await upstreamResp.text());
+        sendJsonError(
+          res,
+          upstreamResp.status,
+          parsedErr.status || upstreamResp.statusText,
+          parsedErr.message || ''
+        );
         return;
       }
       sendJsonError(res, upstreamResp.status, upstreamResp.statusText);
@@ -352,6 +391,11 @@ app.post('/api/proxy', async (req, res) => {
 
     res.status(upstreamResp.status);
     const contentType = upstreamResp.headers.get('content-type');
+    if (contentType?.toLowerCase().includes('text/html')) {
+      console.warn(
+        `[api] POST /api/proxy -> ${upstreamResp.status} with text/html body (target: ${res.locals['target']})`
+      );
+    }
     if (contentType) {
       res.setHeader('Content-Type', contentType);
     }
@@ -373,7 +417,7 @@ app.post('/api/proxy', async (req, res) => {
         };
         const upstreamErr = parsed?.error;
         if (upstreamErr && /^[A-Z_]+$/.test(upstreamErr.status || '')) {
-          res.status(rawStatus).json({ error: upstreamErr });
+          sendJsonError(res, rawStatus, upstreamErr.status, upstreamErr.message || '');
           return;
         }
       } catch {

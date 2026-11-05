@@ -31,6 +31,7 @@ Welcome! As an AI development assistant (Gemini, Antigravity, Jetski, Google AI 
   * **One code path for every API call**: All JSON API calls in the client must go through `ConfigService.fetchJson(label, url, init)`, which throws `<label> API error (HTTP <code> (<status>)): <message>` on network failure, non-OK status, or a non-JSON body. Do not call `resp.json()` / `resp.text()` on API responses and build your own error messages.
   * **One code path for every error display**: Any error shown to the user (description panel, chat, dialogs, toasts, speech) must be converted with `describeError(err)` from `config_service.ts`. Never display raw response bodies.
   * `src/server.ts` must answer every `/api/*` failure with JSON `{error: {code, status, message}}`, taking `message` only from JSON upstream errors.
+  * **Never send 4xx/5xx HTTP statuses from `/api/*`**: hosting front-ends (e.g. the Google AI Studio preview proxy) replace them with their own HTML "Service Unavailable" pages. Send HTTP 200 with the real code in the `X-Upstream-Status` header (`sendJsonError()` in `src/server.ts`); `ConfigService.proxiedFetch()` restores the real status for all callers.
 * **Obtaining Keys**: The developer (user) can and will provide actual, functional API keys (e.g. Google Maps, Gemini, and Mapillary keys) when requested by the agent.
 * Avoid hardcoding any credentials or API keys in source files.
 
