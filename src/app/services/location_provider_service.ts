@@ -15,7 +15,6 @@
  */
 
 import { Injectable, inject } from '@angular/core';
-import { formatApiErrorResponse } from './ai_provider_service';
 import {
   AutocompleteItem,
   AutocompleteResponse,
@@ -159,21 +158,9 @@ export class LocationProviderService {
 
     try {
       queryAudit.recordExternal(`${plugin.name}_fwd`, norm);
-      const resp = await this.config.proxiedFetch(url, {
+      const data = await this.config.fetchJson('Geocoding', url, {
         headers: { Accept: 'application/json' },
       });
-      if (resp.status === 429) {
-        throw new Error(
-          `Geocoding API error (HTTP 429): Rate limit or quota exceeded for ${plugin.name}.`
-        );
-      }
-      if (!resp.ok) {
-        const errText = await resp.text().catch(() => '');
-        throw new Error(
-          formatApiErrorResponse('Geocoding', resp.status, resp.statusText, errText)
-        );
-      }
-      const data = await resp.json();
 
       if (plugin.statusField && plugin.statusOkValue) {
         const statusVal = String(getFieldByPath(data, [plugin.statusField]) || '');

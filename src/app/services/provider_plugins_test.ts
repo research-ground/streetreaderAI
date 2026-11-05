@@ -18,7 +18,7 @@ import { TestBed } from '@angular/core/testing';
 import { vi } from 'vitest';
 import { AiProviderService, formatApiErrorResponse } from './ai_provider_service';
 import { clearAllClientCaches } from './client_cache';
-import { ConfigService } from './config_service';
+import { ConfigService, describeError } from './config_service';
 import { ImageryProviderService } from './imagery_provider_service';
 import { LocationProviderService } from './location_provider_service';
 import { blobToBase64 } from './panorama_crop_service';
@@ -354,6 +354,64 @@ openai_api_key = TestOpenAiKey
     expect(descRes.description).toBe(
       'Brick storefront with a coffee shop awning.'
     );
+  });
+
+  it('describeImage errors report HTTP codes and never include HTML bodies', async () => {
+    const config = TestBed.inject(ConfigService);
+    const ai = TestBed.inject(AiProviderService);
+    config.applyConfText(`
+[system]
+ai_provider = gemini
+
+[keys]
+gemini_api_key = TestGeminiKey
+    `);
+    const html = '<!DOCTYPE html><html><body><h1>502 Bad Gateway</h1></body></html>';
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+
+    // HTML error page with a failing status
+    fetchSpy.mockResolvedValueOnce(
+      new Response(html, {
+        status: 502,
+        statusText: 'Bad Gateway',
+        headers: { 'Content-Type': 'text/html' },
+      })
+    );
+    const err502 = await ai.describeImage('base64img').catch((e: Error) => e.message);
+    expect(err502).toContain('HTTP 502');
+    expect(err502).not.toContain('<');
+
+    // HTML page returned with HTTP 200 (e.g. an SPA fallback or login page)
+    fetchSpy.mockResolvedValueOnce(
+      new Response(html, { status: 200, headers: { 'Content-Type': 'text/html' } })
+    );
+    const err200 = await ai.describeImage('base64img').catch((e: Error) => e.message);
+    expect(err200).toContain('HTTP 200');
+    expect(err200).toContain('expected a JSON response');
+    expect(err200).not.toContain('<');
+
+    // JSON error from Gemini keeps its code, status, and message
+    fetchSpy.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          error: { code: 429, status: 'RESOURCE_EXHAUSTED', message: 'Quota exceeded.' },
+        }),
+        { status: 429, headers: { 'Content-Type': 'application/json' } }
+      )
+    );
+    const err429 = await ai.describeImage('base64img').catch((e: Error) => e.message);
+    expect(err429).toContain('HTTP 429 (RESOURCE_EXHAUSTED)');
+    expect(err429).toContain('Quota exceeded.');
+  });
+
+  it('describeError never surfaces raw JSON parse errors containing HTML', () => {
+    let parseErr: unknown;
+    try {
+      JSON.parse('<!DOCTYPE html><html></html>');
+    } catch (e) {
+      parseErr = e;
+    }
+    expect(describeError(parseErr)).not.toContain('<');
   });
 
   it('formatApiErrorResponse preserves HTTP 503, 429, and strips raw HTML error bodies', () => {

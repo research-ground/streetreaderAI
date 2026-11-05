@@ -24,6 +24,7 @@ import { CommandService, AppCommand } from './command_service';
 import { ToastService } from './toast_service';
 import { StreetViewLinksService } from './street_view_links_service';
 import { ApiService } from './api_service';
+import { describeError } from './config_service';
 import { Subscription } from 'rxjs';
 
 export type AppActivityState = 'IDLE' | 'TRAVELING' | 'TURNING' | 'MOVING' | 'LISTENING';
@@ -277,10 +278,7 @@ export class AppController {
         this.waitingOnAnswer.set(false);
         this.currentAskSubscription = null;
         console.error('Error executing action:', err);
-        const msg =
-          err instanceof Error && err.message
-            ? err.message
-            : 'There was an error communicating with the AI service.';
+        const msg = describeError(err, 'There was an error communicating with the AI service.');
         this.stateService.addChatMessage('assistant', msg);
         this.speechOutputService.speak(msg, true);
       }

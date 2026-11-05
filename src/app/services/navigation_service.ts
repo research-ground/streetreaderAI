@@ -15,6 +15,7 @@
  */
 
 import { Injectable, inject } from '@angular/core';
+import { describeError } from './config_service';
 import { ApiService, GetViewResponse, Link, NearbyPlace, RenderViewResponse } from './api_service';
 import { StateService } from './state_service';
 import { DescriptionService } from './description_service';
@@ -314,10 +315,7 @@ export class NavigationService {
 
   private reportError(err: unknown, title: string) {
     this.stateService.setLoading(false);
-    const message =
-      (err as { error?: { message?: string } })?.error?.message ??
-      (err as { message?: string })?.message ??
-      'Unknown error occurred.';
+    const message = describeError(err, 'Unknown error occurred.');
     this.dialog.open(ErrorDialogComponent, { data: { title, message }, width: '400px' });
   }
 }

@@ -15,6 +15,7 @@
  */
 
 import { Component, inject } from '@angular/core';
+import { describeError } from '../../services/config_service';
 import { CommonModule } from '@angular/common';
 import { ReactiveFormsModule, FormControl } from '@angular/forms';
 import { MatFormFieldModule } from '@angular/material/form-field';
@@ -81,7 +82,7 @@ export class NavigationComponent {
               return { status, items };
             }),
             catchError((err) => {
-              const errMsg = err?.error?.message || err?.message || 'Unknown error occurred.';
+              const errMsg = describeError(err, 'Unknown error occurred.');
               this.dialog.open(ErrorDialogComponent, {
                 data: { title: 'Autocomplete Error', message: errMsg },
                 width: '400px',

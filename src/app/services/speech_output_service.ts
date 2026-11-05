@@ -16,8 +16,7 @@
 
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { MatSnackBar } from '@angular/material/snack-bar';
-import { formatApiErrorResponse } from './ai_provider_service';
-import { ConfigService, interpolateUrlTemplate } from './config_service';
+import { ConfigService, describeError, interpolateUrlTemplate } from './config_service';
 import { safeStorage } from './safe_storage';
 
 export type SpeechEngine = 'local' | 'gemini';
@@ -303,7 +302,7 @@ export class SpeechOutputService {
       audioBlob = await this.fetchGeminiAudio(text);
     } catch (err) {
       if (generation !== this.generation) return;
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = describeError(err);
       console.error('[SpeechService] Gemini TTS failed:', msg);
       this.snackBar.open(`Gemini voice unavailable, using local voice. ${msg}`, 'Dismiss', {
         duration: 6000,
@@ -354,7 +353,8 @@ export class SpeechOutputService {
     }
 
     this.geminiAbort = new AbortController();
-    const resp = await this.config.proxiedFetch(
+    const data = await this.config.fetchJson(
+      'Gemini TTS',
       interpolateUrlTemplate(tts.endpointUrl, { model: tts.modelId, apiKey }),
       {
         method: 'POST',
@@ -372,14 +372,6 @@ export class SpeechOutputService {
       }
     );
 
-    if (!resp.ok) {
-      const errBody = await resp.text().catch(() => '');
-      throw new Error(
-        formatApiErrorResponse('Gemini TTS', resp.status, resp.statusText, errBody)
-      );
-    }
-
-    const data = await resp.json();
     const parts: Array<{ inlineData?: { data?: string; mimeType?: string } }> =
       data?.candidates?.[0]?.content?.parts || [];
     const inline = parts.find((p) => p.inlineData?.data)?.inlineData;

@@ -291,6 +291,92 @@ export function interpolateUrlTemplate(
   });
 }
 
+export function formatApiErrorResponse(
+  providerName: string,
+  status: number,
+  statusText: string,
+  rawBody: string
+): string {
+  const trimmed = (rawBody || '').trim();
+  let detail = '';
+  let statusCodeLabel = statusText ? `HTTP ${status} (${statusText})` : `HTTP ${status}`;
+
+  if (trimmed) {
+    try {
+      const parsed = JSON.parse(trimmed) as {
+        error?:
+          | string
+          | {
+              code?: number | string;
+              status?: string;
+              message?: string;
+            };
+        message?: string;
+      };
+      if (parsed && typeof parsed === 'object') {
+        if (typeof parsed.error === 'string') {
+          try {
+            const inner = JSON.parse(parsed.error) as {
+              error?: { code?: number | string; status?: string; message?: string };
+            };
+            if (inner?.error?.message) {
+              detail = inner.error.message;
+              if (inner.error.status) {
+                statusCodeLabel = `HTTP ${inner.error.code || status} (${inner.error.status})`;
+              }
+            } else {
+              detail = parsed.error;
+            }
+          } catch {
+            detail = parsed.error;
+          }
+        } else if (parsed.error && typeof parsed.error === 'object') {
+          detail = parsed.error.message || '';
+          if (parsed.error.status) {
+            statusCodeLabel = `HTTP ${parsed.error.code || status} (${parsed.error.status})`;
+          }
+        } else if (typeof parsed.message === 'string') {
+          detail = parsed.message;
+        }
+      }
+    } catch {
+      // Non-JSON error body (e.g. an HTML error page): never show it, report
+      // only the HTTP status code and status text below.
+    }
+  }
+
+  if (!detail) {
+    if (status === 503) {
+      detail = 'Service Unavailable — the model is overloaded or temporarily unavailable.';
+    } else if (status === 429) {
+      detail = 'Quota Exceeded / Rate Limited — API quota has been exhausted.';
+    } else {
+      detail = statusText || 'Request failed.';
+    }
+  }
+
+  return `${providerName} API error (${statusCodeLabel}): ${detail}`;
+}
+
+/**
+ * Converts any thrown value into the text shown to the user. All UI error
+ * displays (description panel, chat, dialogs, toasts) must use this.
+ * API failures already carry a formatted `HTTP <code>` message from
+ * `ConfigService.fetchJson()`; raw response bodies are never included.
+ */
+export function describeError(err: unknown, fallback = 'An unknown error occurred.'): string {
+  if (err instanceof SyntaxError) {
+    // e.g. `Unexpected token '<', "<!DOCTYPE ..." is not valid JSON`
+    return 'Received an invalid (non-JSON) response from the server.';
+  }
+  if (err instanceof Error) {
+    return err.message || fallback;
+  }
+  const nested = (err as { error?: { message?: unknown } })?.error?.message;
+  if (typeof nested === 'string' && nested) return nested;
+  return typeof err === 'string' && err ? err : fallback;
+}
+
 function readInjectedEnv(key: string): string {
   try {
     const g = globalThis as Record<string, unknown>;
@@ -452,6 +538,35 @@ export class ConfigService {
       }),
       signal: init?.signal,
     });
+  }
+
+  /**
+   * The single entry point for JSON API calls. Throws an `Error` whose message
+   * is `<label> API error (HTTP <code> (<status>)): <message>` when the request
+   * fails, the HTTP status is not OK, or the body is not JSON. The message only
+   * uses fields from JSON error bodies; raw (e.g. HTML) bodies are never shown.
+   */
+  async fetchJson<T = any>(label: string, url: string, init?: RequestInit): Promise<T> {
+    let resp: Response;
+    try {
+      resp = await this.proxiedFetch(url, init);
+    } catch (err) {
+      if ((err as { name?: string })?.name === 'AbortError') throw err;
+      throw new Error(`${label} API error: network request failed (${describeError(err)}).`);
+    }
+
+    const bodyText = await resp.text().catch(() => '');
+    if (!resp.ok) {
+      throw new Error(formatApiErrorResponse(label, resp.status, resp.statusText, bodyText));
+    }
+    try {
+      return JSON.parse(bodyText) as T;
+    } catch {
+      const contentType = resp.headers.get('content-type') || 'unknown content type';
+      throw new Error(
+        `${label} API error (HTTP ${resp.status}): expected a JSON response but received ${contentType}.`
+      );
+    }
   }
 
   /**

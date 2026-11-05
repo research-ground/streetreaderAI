@@ -22,6 +22,8 @@ import {
   interpolateUrlTemplate,
 } from './config_service';
 
+export { formatApiErrorResponse } from './config_service';
+
 export const CHAT_PREAMBLE =
   'You can only answer questions about the visual scene and landmarks to ' +
   'support blind and low vision travelers. If asked about anything else, ' +
@@ -86,73 +88,6 @@ function stripDataUrlPrefix(base64OrDataUrl: string): string {
   return idx >= 0 ? base64OrDataUrl.slice(idx + 1) : base64OrDataUrl;
 }
 
-export function formatApiErrorResponse(
-  providerName: string,
-  status: number,
-  statusText: string,
-  rawBody: string
-): string {
-  const trimmed = (rawBody || '').trim();
-  let detail = '';
-  let statusCodeLabel = statusText ? `HTTP ${status} (${statusText})` : `HTTP ${status}`;
-
-  if (trimmed) {
-    try {
-      const parsed = JSON.parse(trimmed) as {
-        error?:
-          | string
-          | {
-              code?: number | string;
-              status?: string;
-              message?: string;
-            };
-        message?: string;
-      };
-      if (parsed && typeof parsed === 'object') {
-        if (typeof parsed.error === 'string') {
-          try {
-            const inner = JSON.parse(parsed.error) as {
-              error?: { code?: number | string; status?: string; message?: string };
-            };
-            if (inner?.error?.message) {
-              detail = inner.error.message;
-              if (inner.error.status) {
-                statusCodeLabel = `HTTP ${inner.error.code || status} (${inner.error.status})`;
-              }
-            } else {
-              detail = parsed.error;
-            }
-          } catch {
-            detail = parsed.error;
-          }
-        } else if (parsed.error && typeof parsed.error === 'object') {
-          detail = parsed.error.message || '';
-          if (parsed.error.status) {
-            statusCodeLabel = `HTTP ${parsed.error.code || status} (${parsed.error.status})`;
-          }
-        } else if (typeof parsed.message === 'string') {
-          detail = parsed.message;
-        }
-      }
-    } catch {
-      // Non-JSON error body (e.g. an HTML error page): never show it, report
-      // only the HTTP status code and status text below.
-    }
-  }
-
-  if (!detail) {
-    if (status === 503) {
-      detail = 'Service Unavailable — the model is overloaded or temporarily unavailable.';
-    } else if (status === 429) {
-      detail = 'Quota Exceeded / Rate Limited — API quota has been exhausted.';
-    } else {
-      detail = statusText || 'Request failed.';
-    }
-  }
-
-  return `${providerName} API error (${statusCodeLabel}): ${detail}`;
-}
-
 @Injectable({
   providedIn: 'root',
 })
@@ -213,13 +148,13 @@ export class AiProviderService {
   private async fetchGemini(
     plugin: AiPluginConfig,
     body: Record<string, unknown>
-  ): Promise<Response> {
+  ): Promise<any> {
     const apiKey = this.ensurePluginKey(plugin);
     const url = interpolateUrlTemplate(plugin.endpointUrl, {
       model: plugin.modelId,
       apiKey,
     });
-    return this.config.proxiedFetch(url, {
+    return this.config.fetchJson(plugin.name, url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -230,7 +165,7 @@ export class AiProviderService {
     plugin: AiPluginConfig,
     cleanBase64: string
   ): Promise<DescribeImageResponse> {
-    const resp = await this.fetchGemini(plugin, {
+    const data = await this.fetchGemini(plugin, {
       contents: [
         {
           parts: [
@@ -260,14 +195,6 @@ export class AiProviderService {
       },
     });
 
-    if (!resp.ok) {
-      const errBody = await resp.text();
-      throw new Error(
-        formatApiErrorResponse(plugin.name, resp.status, resp.statusText, errBody)
-      );
-    }
-
-    const data = await resp.json();
     const rawText =
       data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
     try {
@@ -297,7 +224,7 @@ export class AiProviderService {
     detectActions: boolean
   ): Promise<AskQuestionResponse> {
     const prompt = buildQuestionPrompt(question, detectActions);
-    const resp = await this.fetchGemini(plugin, {
+    const data = await this.fetchGemini(plugin, {
       contents: [
         {
           parts: [
@@ -334,14 +261,6 @@ export class AiProviderService {
       },
     });
 
-    if (!resp.ok) {
-      const errBody = await resp.text();
-      throw new Error(
-        formatApiErrorResponse(plugin.name, resp.status, resp.statusText, errBody)
-      );
-    }
-
-    const data = await resp.json();
     const rawText =
       data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
     try {
@@ -371,7 +290,7 @@ export class AiProviderService {
     cleanBase64: string
   ): Promise<DescribeImageResponse> {
     const key = this.ensurePluginKey(plugin);
-    const resp = await this.config.proxiedFetch(plugin.endpointUrl, {
+    const data = await this.config.fetchJson(plugin.name, plugin.endpointUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -416,14 +335,6 @@ export class AiProviderService {
       }),
     });
 
-    if (!resp.ok) {
-      const errBody = await resp.text();
-      throw new Error(
-        formatApiErrorResponse(plugin.name, resp.status, resp.statusText, errBody)
-      );
-    }
-
-    const data = await resp.json();
     const rawContent = String(data?.choices?.[0]?.message?.content || '').trim();
     try {
       const parsed = JSON.parse(rawContent);
@@ -454,7 +365,7 @@ export class AiProviderService {
     const key = this.ensurePluginKey(plugin);
     const prompt = buildQuestionPrompt(question, detectActions);
 
-    const resp = await this.config.proxiedFetch(plugin.endpointUrl, {
+    const data = await this.config.fetchJson(plugin.name, plugin.endpointUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -507,14 +418,6 @@ export class AiProviderService {
       }),
     });
 
-    if (!resp.ok) {
-      const errBody = await resp.text();
-      throw new Error(
-        formatApiErrorResponse(plugin.name, resp.status, resp.statusText, errBody)
-      );
-    }
-
-    const data = await resp.json();
     const rawContent = data?.choices?.[0]?.message?.content || '{}';
     try {
       const parsed = JSON.parse(rawContent);

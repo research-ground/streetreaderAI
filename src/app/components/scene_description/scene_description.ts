@@ -23,6 +23,7 @@ import { DescriptionService } from '../../services/description_service';
 import { DescriptionCacheService } from '../../services/description_cache_service';
 import { SpeechOutputService } from '../../services/speech_output_service';
 import { StreetViewLinksService } from '../../services/street_view_links_service';
+import { describeError } from '../../services/config_service';
 import { Subscription, Subject, takeUntil, debounce, timer, of } from 'rxjs';
 
 @Component({
@@ -143,10 +144,7 @@ export class SceneDescriptionComponent implements OnDestroy {
         },
         error: (err) => {
           console.error('Error fetching description:', err);
-          const msg =
-            err instanceof Error && err.message
-              ? err.message
-              : 'An error occurred while fetching the description.';
+          const msg = describeError(err, 'An error occurred while fetching the description.');
           this.processDescription(msg, false);
           this.isLoading.set(false);
         }
