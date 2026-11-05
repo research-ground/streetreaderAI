@@ -15,6 +15,7 @@
  */
 
 import { Injectable, inject } from '@angular/core';
+import { formatApiErrorResponse } from './ai_provider_service';
 import {
   AutocompleteItem,
   AutocompleteResponse,
@@ -168,11 +169,8 @@ export class LocationProviderService {
       }
       if (!resp.ok) {
         const errText = await resp.text().catch(() => '');
-        const cleanErr = errText.startsWith('<')
-          ? resp.statusText || 'Upstream service error'
-          : errText.slice(0, 200) || resp.statusText || 'Request failed';
         throw new Error(
-          `Geocoding API error (HTTP ${resp.status}): ${cleanErr}`
+          formatApiErrorResponse('Geocoding', resp.status, resp.statusText, errText)
         );
       }
       const data = await resp.json();

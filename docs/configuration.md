@@ -154,6 +154,17 @@ Each `[ai.<name>]` section configures [`AiProviderService`](../src/app/services/
 | `model_id` | Model identifier substituted into `{model}` or sent in the request body (`gemini-3.5-flash-lite` or `gpt-5.6-terra`). |
 | `endpoint_url` | Full API endpoint URL template (supports `{model}` and `{apiKey}` placeholders). |
 
+### Gemini Voice Output (`[tts.gemini]`)
+
+When **Voice type** is set to **Gemini** in Settings, [`SpeechOutputService`](../src/app/services/speech_output_service.ts) synthesizes speech with the model configured here (requests go through `POST /api/proxy`, so the key stays on the server). If a Gemini TTS request fails, the HTTP error is shown and that phrase is spoken with the local voice instead. The **Local** voice type uses English browser/OS voices only.
+
+```ini
+[tts.gemini]
+requires_key = gemini_api_key
+model_id = gemini-3.8-flash-lite-tts
+endpoint_url = https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={apiKey}
+```
+
 ---
 
 ## 5. Adding a New Provider (No Code Required)

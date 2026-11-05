@@ -126,13 +126,32 @@ import { safeStorage } from '../../services/safe_storage';
 
         <div class="setting-group">
           <mat-form-field appearance="outline" class="full-width">
-            <mat-label>Voice</mat-label>
-            <mat-select [value]="speechOutputService.selectedVoice()" (selectionChange)="speechOutputService.setVoice($event.value)">
-              @for (voice of speechOutputService.availableVoices(); track voice.name) {
-                <mat-option [value]="voice">{{ voice.name }} ({{ voice.lang }})</mat-option>
-              }
+            <mat-label>Voice type</mat-label>
+            <mat-select [value]="speechOutputService.engine()" (selectionChange)="speechOutputService.setEngine($event.value)">
+              <mat-option value="local">Local</mat-option>
+              <mat-option value="gemini">Gemini</mat-option>
             </mat-select>
           </mat-form-field>
+
+          @if (speechOutputService.engine() === 'gemini') {
+            <mat-form-field appearance="outline" class="full-width">
+              <mat-label>Voice</mat-label>
+              <mat-select [value]="speechOutputService.geminiVoice()" (selectionChange)="speechOutputService.setGeminiVoice($event.value)">
+                @for (voice of speechOutputService.geminiVoices; track voice.name) {
+                  <mat-option [value]="voice.name">{{ voice.name }} ({{ voice.style }})</mat-option>
+                }
+              </mat-select>
+            </mat-form-field>
+          } @else {
+            <mat-form-field appearance="outline" class="full-width">
+              <mat-label>Voice</mat-label>
+              <mat-select [value]="speechOutputService.selectedVoice()" (selectionChange)="speechOutputService.setVoice($event.value)">
+                @for (voice of speechOutputService.availableVoices(); track voice.name) {
+                  <mat-option [value]="voice">{{ voice.name }} ({{ voice.lang }})</mat-option>
+                }
+              </mat-select>
+            </mat-form-field>
+          }
 
           <div class="slider-container">
             <span class="setting-label" id="rate-label">Speed: {{ speechOutputService.rate() | number: '1.1-1' }}x</span>

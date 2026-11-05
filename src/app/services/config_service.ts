@@ -72,6 +72,12 @@ export interface AiPluginConfig {
   endpointUrl: string;
 }
 
+export interface GeminiTtsConfig {
+  requiresKey?: string;
+  modelId: string;
+  endpointUrl: string;
+}
+
 export const DEFAULT_STARTING_ADDRESS = '2110 5th Ave, Seattle, WA';
 export const DEFAULT_PANORAMAX_BASE_URL = 'https://api.panoramax.xyz/api';
 export const DEFAULT_MAPILLARY_BASE_URL = 'https://graph.mapillary.com';
@@ -179,6 +185,11 @@ requires_key = openai_api_key
 wire_format = openai
 model_id = gpt-5.6-terra
 endpoint_url = https://api.openai.com/v1/chat/completions
+
+[tts.gemini]
+requires_key = gemini_api_key
+model_id = gemini-3.8-flash-lite-tts
+endpoint_url = https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={apiKey}
 `.trim();
 
 const STORAGE_KEYS = {
@@ -630,6 +641,17 @@ export class ConfigService {
 
   getAiPlugin(name?: string): AiPluginConfig | undefined {
     return this.aiPlugins.get((name || this.aiProvider()).toLowerCase());
+  }
+
+  /** Returns the Gemini text-to-speech settings from `[tts.gemini]`. */
+  getGeminiTtsConfig(): GeminiTtsConfig | undefined {
+    const sec = this.sections['tts.gemini'];
+    if (!sec || !sec['model_id'] || !sec['endpoint_url']) return undefined;
+    return {
+      requiresKey: sec['requires_key'] || undefined,
+      modelId: sec['model_id'],
+      endpointUrl: sec['endpoint_url'],
+    };
   }
 
   /**

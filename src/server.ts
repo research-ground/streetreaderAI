@@ -23,6 +23,7 @@ import {
 import { GoogleGenAI } from '@google/genai';
 import express from 'express';
 import * as fs from 'node:fs';
+import * as http from 'node:http';
 import * as path from 'node:path';
 import {
   DEFAULT_STREETREADER_CONF,
@@ -186,6 +187,26 @@ function replaceServerKeyPlaceholders(
   return { output, resolvedKeys };
 }
 
+/**
+ * Sends a JSON error `{error: {code, status, message}}`. `message` is only set
+ * from trusted sources (JSON error bodies or local error strings), never from
+ * raw upstream response bodies.
+ */
+function sendJsonError(
+  res: express.Response,
+  code: number,
+  statusText?: string,
+  message: string = ''
+): void {
+  res.status(code).json({
+    error: {
+      code,
+      status: statusText || http.STATUS_CODES[code] || '',
+      message,
+    },
+  });
+}
+
 const app = express();
 const angularApp = new AngularNodeAppEngine({
   allowedHosts: ['*'],
@@ -316,17 +337,17 @@ app.post('/api/proxy', async (req, res) => {
     });
 
     if (!upstreamResp.ok) {
+      // Forward JSON error bodies as-is; for any other error body (HTML pages,
+      // plain text, etc.) report only the HTTP status code and status text.
       const contentType = (upstreamResp.headers.get('content-type') || '').toLowerCase();
-      if (contentType.includes('text/html')) {
-        res.status(upstreamResp.status).json({
-          error: {
-            code: upstreamResp.status,
-            status: upstreamResp.statusText || 'UPSTREAM_ERROR',
-            message: `Upstream service ${targetHost} returned HTTP ${upstreamResp.status}${upstreamResp.statusText ? ` (${upstreamResp.statusText})` : ''}.`,
-          },
-        });
+      if (contentType.includes('json')) {
+        res.status(upstreamResp.status);
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.send(Buffer.from(await upstreamResp.arrayBuffer()));
         return;
       }
+      sendJsonError(res, upstreamResp.status, upstreamResp.statusText);
+      return;
     }
 
     res.status(upstreamResp.status);
@@ -339,33 +360,50 @@ app.post('/api/proxy', async (req, res) => {
   } catch (err: unknown) {
     const rawStatus = (err as { status?: number })?.status;
     const rawMsg = err instanceof Error ? err.message : String(err);
-    try {
-      const parsed = JSON.parse(rawMsg) as {
-        error?: { code?: number; status?: string; message?: string };
-      };
-      if (parsed && typeof parsed === 'object' && parsed.error) {
-        const code =
-          typeof rawStatus === 'number' && rawStatus >= 400
-            ? rawStatus
-            : typeof parsed.error.code === 'number' && parsed.error.code >= 400
-              ? parsed.error.code
-              : 502;
-        res.status(code).json({ error: parsed.error });
-        return;
+
+    // @google/genai ApiError: `status` is the HTTP status code and `message` is
+    // a JSON string. When Gemini returned a real JSON error, `error.status` is a
+    // canonical code like "UNAVAILABLE" or "RESOURCE_EXHAUSTED". When the upstream
+    // body was not JSON (e.g. an HTML error page), the SDK stuffs the raw body text
+    // into `error.message`, so in that case we report only the HTTP status.
+    if (typeof rawStatus === 'number' && rawStatus >= 400) {
+      try {
+        const parsed = JSON.parse(rawMsg) as {
+          error?: { code?: number; status?: string; message?: string };
+        };
+        const upstreamErr = parsed?.error;
+        if (upstreamErr && /^[A-Z_]+$/.test(upstreamErr.status || '')) {
+          res.status(rawStatus).json({ error: upstreamErr });
+          return;
+        }
+      } catch {
+        // Not a JSON error string
       }
-    } catch {
-      // Not a JSON error string from @google/genai SDK
+      sendJsonError(res, rawStatus);
+      return;
     }
-    const status =
-      typeof rawStatus === 'number' && rawStatus >= 400 ? rawStatus : 502;
-    res.status(status).json({
-      error: {
-        code: status,
-        message: rawMsg,
-      },
-    });
+
+    // Local failures (network errors, invalid request JSON, etc.)
+    sendJsonError(res, 502, undefined, rawMsg);
   }
 });
+
+/**
+ * Always answer `/api/*` failures (including body-parser errors) with JSON
+ * rather than Express's default HTML error page.
+ */
+app.use(
+  '/api',
+  (
+    err: { status?: number; statusCode?: number; message?: string },
+    _req: express.Request,
+    res: express.Response,
+    _next: express.NextFunction
+  ) => {
+    const status = err?.status || err?.statusCode || 500;
+    sendJsonError(res, status, undefined, err?.message || '');
+  }
+);
 
 /**
  * Serve static files from /browser in production builds.

@@ -94,7 +94,7 @@ export function formatApiErrorResponse(
 ): string {
   const trimmed = (rawBody || '').trim();
   let detail = '';
-  let statusCodeLabel = `HTTP ${status}`;
+  let statusCodeLabel = statusText ? `HTTP ${status} (${statusText})` : `HTTP ${status}`;
 
   if (trimmed) {
     try {
@@ -135,11 +135,8 @@ export function formatApiErrorResponse(
         }
       }
     } catch {
-      if (trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<html') || trimmed.startsWith('<')) {
-        detail = statusText || 'Service returned an HTML error page.';
-      } else {
-        detail = trimmed.slice(0, 300);
-      }
+      // Non-JSON error body (e.g. an HTML error page): never show it, report
+      // only the HTTP status code and status text below.
     }
   }
 
