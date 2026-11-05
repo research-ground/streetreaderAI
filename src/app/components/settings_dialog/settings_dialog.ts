@@ -14,7 +14,7 @@
  limitations under the License.
  */
 
-import { Component, inject } from '@angular/core';
+import { Component, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { MatDialogModule, MatDialogRef } from '@angular/material/dialog';
 import { MatButtonModule } from '@angular/material/button';
@@ -167,6 +167,17 @@ import { safeStorage } from '../../services/safe_storage';
         <h3>Reset Settings</h3>
         <div class="danger-item">
           <span class="danger-text">
+            <strong>Clear cache</strong>
+            <small>Clears cached descriptions, map and imagery data, and Gemini voice audio. Your preferences are kept.</small>
+          </span>
+          <button mat-stroked-button (click)="clearCacheOnly()">Clear cache</button>
+        </div>
+        <p class="sr-only" role="status" aria-live="polite">{{ cacheStatus() }}</p>
+        @if (cacheStatus()) {
+          <small class="cache-status" aria-hidden="true">{{ cacheStatus() }}</small>
+        }
+        <div class="danger-item reset-item">
+          <span class="danger-text">
             <strong>Delete saved data</strong>
             <small>This will reset all your saved preferences (modifier key, speech settings, etc.) and clear the description cache. The page will reload.</small>
           </span>
@@ -205,6 +216,12 @@ import { safeStorage } from '../../services/safe_storage';
       color: #666;
       font-size: 12px;
     }
+    .reset-item { margin-top: 16px; }
+    .cache-status { display: block; color: #2e7d32; font-size: 12px; margin-top: 4px; }
+    .sr-only {
+      position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+      overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+    }
     .setting-item {
       display: flex;
       justify-content: space-between;
@@ -235,9 +252,19 @@ export class SettingsDialog {
   private readonly cache = inject(DescriptionCacheService);
   protected readonly dialogRef = inject(MatDialogRef<SettingsDialog>);
 
+  protected readonly cacheStatus = signal('');
+
   protected onRateChange(event: Event) {
     const target = event.target as HTMLInputElement;
     this.speechOutputService.setRate(parseFloat(target.value));
+  }
+
+  /** Clears cached data only, keeping all saved preferences. */
+  protected clearCacheOnly() {
+    this.cache.clear();
+    clearAllClientCaches();
+    this.speechOutputService.clearCache();
+    this.cacheStatus.set('Cache cleared.');
   }
 
   protected clearCache() {

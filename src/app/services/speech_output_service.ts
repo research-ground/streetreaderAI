@@ -201,6 +201,11 @@ export class SpeechOutputService {
     this.geminiVoiceName.set(name);
   }
 
+  /** Clears cached Gemini TTS audio. */
+  clearCache() {
+    this.geminiAudioCache.clear();
+  }
+
   speak(text: string, speakNow: boolean = false) {
     if (!this.isEnabled()) return;
     if (this.speechEngine() === 'local' && !this.synthesis) return;
